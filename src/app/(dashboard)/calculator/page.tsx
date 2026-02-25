@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Calculator, DollarSign } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Calculator, DollarSign, Loader2, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { MPF_RATE, MPF_MIN, MPF_MAX, HMF_RATE } from "@/lib/utils/constants";
+import { searchHts } from "@/lib/services/hts-service";
+import { parseDutyRate } from "@/lib/services/hts-service";
 
 interface CostBreakdown {
   productCost: number;
@@ -35,6 +37,73 @@ export default function CalculatorPage() {
   const [section301Rate, setSection301Rate] = useState("");
   const [shippingMode, setShippingMode] = useState("air");
   const [result, setResult] = useState<CostBreakdown | null>(null);
+  const [htsLookup, setHtsLookup] = useState<"idle" | "loading" | "found" | "not-found">("idle");
+  const [htsDescription, setHtsDescription] = useState("");
+  const lookupTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const lookupHtsRate = useCallback(async (code: string) => {
+    // Clean the code — strip dots/spaces to get just digits
+    const clean = code.replace(/[\s.-]/g, "");
+    if (clean.length < 4) {
+      setHtsLookup("idle");
+      setHtsDescription("");
+      return;
+    }
+
+    setHtsLookup("loading");
+
+    try {
+      // Search USITC with the first 4 digits (heading) for broader match
+      const searchTerm = code.replace(/[\s]/g, "");
+      const results = await searchHts(searchTerm);
+
+      // Try exact match first, then prefix match
+      const exact = results.find((r) => r.htsno.replace(/[\s.-]/g, "") === clean);
+      const prefix = results.find((r) => r.htsno.replace(/[\s.-]/g, "").startsWith(clean));
+      const match = exact || prefix;
+
+      if (match && match.general) {
+        const rate = parseDutyRate(match.general);
+        setDutyRate(rate > 0 ? rate.toString() : match.general === "Free" ? "0" : "");
+        setHtsDescription(match.description);
+        setHtsLookup("found");
+
+        // Check footnotes for Section 301
+        const has301 = match.footnotes?.some(
+          (fn) => fn.value && /9903\.88/.test(fn.value)
+        );
+        if (has301 && !section301Rate) {
+          setSection301Rate("7.5");
+        }
+      } else {
+        setHtsLookup("not-found");
+        setHtsDescription("");
+      }
+    } catch {
+      setHtsLookup("not-found");
+      setHtsDescription("");
+    }
+  }, [section301Rate]);
+
+  const handleHtsChange = (value: string) => {
+    setHtsCode(value);
+    setHtsLookup("idle");
+
+    // Debounce the lookup
+    if (lookupTimeout.current) clearTimeout(lookupTimeout.current);
+    lookupTimeout.current = setTimeout(() => {
+      lookupHtsRate(value);
+    }, 600);
+  };
+
+  const handleHtsPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData("text").trim();
+    if (pasted) {
+      // Let the onChange fire first, then trigger immediate lookup
+      if (lookupTimeout.current) clearTimeout(lookupTimeout.current);
+      setTimeout(() => lookupHtsRate(pasted), 100);
+    }
+  };
 
   const calculate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,12 +169,35 @@ export default function CalculatorPage() {
           <CardContent>
             <form onSubmit={calculate} className="space-y-4">
               <div className="space-y-2">
-                <Label>HTS Code (optional)</Label>
+                <div className="flex items-center justify-between">
+                  <Label>HTS Code</Label>
+                  {htsLookup === "loading" && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Looking up rate...
+                    </span>
+                  )}
+                  {htsLookup === "found" && (
+                    <span className="flex items-center gap-1 text-xs text-green-600">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Rate auto-filled
+                    </span>
+                  )}
+                  {htsLookup === "not-found" && htsCode.length >= 4 && (
+                    <span className="text-xs text-muted-foreground">
+                      No exact match — enter rate manually
+                    </span>
+                  )}
+                </div>
                 <Input
-                  placeholder="e.g. 6110.20.2079"
+                  placeholder="e.g. 6110.20.2079 — paste to auto-fill duty rate"
                   value={htsCode}
-                  onChange={(e) => setHtsCode(e.target.value)}
+                  onChange={(e) => handleHtsChange(e.target.value)}
+                  onPaste={handleHtsPaste}
                 />
+                {htsDescription && htsLookup === "found" && (
+                  <p className="text-xs text-muted-foreground">{htsDescription}</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
