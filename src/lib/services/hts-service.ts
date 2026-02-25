@@ -36,7 +36,6 @@ export async function searchHts(keyword: string): Promise<HtsSearchResult[]> {
   const url = `${USITC_API_BASE}/search?keyword=${encodeURIComponent(keyword)}`;
   const response = await fetch(url, {
     headers: { Accept: "application/json" },
-    next: { revalidate: 3600 }, // Cache for 1 hour
   });
 
   if (!response.ok) {

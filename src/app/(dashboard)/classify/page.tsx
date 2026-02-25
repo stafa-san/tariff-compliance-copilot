@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { classifyProduct, type ClassifyResult } from "@/lib/services/classify-client";
 
 const SAMPLE_COUNTRIES = [
   { value: "CN", label: "China" },
@@ -49,13 +50,6 @@ interface ClassificationResult {
   countryName: string;
 }
 
-interface ApiResponse {
-  classification: ClassificationResult | null;
-  message?: string;
-  keywords: string[];
-  totalResults?: number;
-}
-
 export default function ClassifyPage() {
   const [productDescription, setProductDescription] = useState("");
   const [countryOfOrigin, setCountryOfOrigin] = useState("");
@@ -72,18 +66,7 @@ export default function ClassifyPage() {
     setError("");
 
     try {
-      const response = await fetch("/api/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productDescription, countryOfOrigin }),
-      });
-
-      const data: ApiResponse = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || "Classification failed. Please try again.");
-        return;
-      }
+      const data: ClassifyResult = await classifyProduct(productDescription, countryOfOrigin);
 
       if (!data.classification) {
         setError(data.message || "No matching HTS codes found. Try a more specific description.");
@@ -94,7 +77,7 @@ export default function ClassifyPage() {
       setResult(data.classification);
       setMeta({ keywords: data.keywords, totalResults: data.totalResults || 0 });
     } catch {
-      setError("Failed to connect to classification service. Please try again.");
+      setError("Failed to search USITC database. Please try again.");
     } finally {
       setLoading(false);
     }
