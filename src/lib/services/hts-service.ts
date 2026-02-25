@@ -46,18 +46,45 @@ export async function searchHts(keyword: string): Promise<HtsSearchResult[]> {
 }
 
 /**
- * Search and parse HTS results into a cleaner format
+ * Search and parse HTS results into a cleaner format.
+ * Handles USITC rate inheritance — child entries with empty rates
+ * inherit from their nearest parent with a rate.
  */
 export async function searchAndParseHts(keyword: string): Promise<ParsedHtsResult[]> {
   const raw = await searchHts(keyword);
-  return raw
-    .filter((r) => r.htsno && r.general) // Only entries with codes and rates
+
+  if (raw.length === 0) return [];
+
+  // Build rate inheritance: child entries inherit parent rates
+  // USITC returns results in hierarchical order
+  let lastGeneralRate = "";
+  let lastSpecialRate = "";
+  let lastOtherRate = "";
+
+  const withRates = raw.map((r) => {
+    // If this entry has a rate, it becomes the new parent rate
+    if (r.general) {
+      lastGeneralRate = r.general;
+      lastSpecialRate = r.special || "";
+      lastOtherRate = r.other || "";
+    }
+
+    return {
+      ...r,
+      inheritedGeneral: r.general || lastGeneralRate,
+      inheritedSpecial: r.special || lastSpecialRate,
+      inheritedOther: r.other || lastOtherRate,
+    };
+  });
+
+  return withRates
+    .filter((r) => r.htsno) // Must have a code
     .map((r) => ({
       htsCode: r.htsno,
       description: r.description,
-      generalRate: r.general,
-      specialRate: r.special || "",
-      otherRate: r.other || "",
+      generalRate: r.inheritedGeneral,
+      specialRate: r.inheritedSpecial,
+      otherRate: r.inheritedOther,
       units: r.units || [],
       section301Note: extractSection301(r.footnotes),
       indent: parseInt(r.indent) || 0,
@@ -97,8 +124,9 @@ export function parseDutyRate(rateStr: string): number {
 }
 
 /**
- * Build smart search keywords from a product description
- * Strips filler words and focuses on material + product type
+ * Build smart search keywords from a product description.
+ * Prioritizes garment/product nouns over modifiers, and generates
+ * multiple strategies for better USITC coverage.
  */
 export function buildSearchKeywords(description: string): string[] {
   const words = description
@@ -116,32 +144,58 @@ export function buildSearchKeywords(description: string): string[] {
 
   const keywords = words.filter((w) => !stopWords.has(w));
 
-  // Build multi-word search strategies
-  const strategies: string[] = [];
+  // Primary product nouns (higher priority — these map directly to HTS headings)
+  const primaryTypes = [
+    "sweatshirt", "sweater", "pullover", "shirt", "blouse", "pants",
+    "trouser", "dress", "jacket", "coat", "skirt", "sock", "shoe",
+    "boot", "hat", "glove", "bag", "earbuds", "headphones", "cable",
+    "phone", "laptop", "toy", "furniture",
+  ];
+  // Modifier types (lower priority — refine but don't identify the product)
+  const modifierTypes = ["hooded", "knitted", "crocheted", "woven"];
 
-  // Strategy 1: Material + product type (e.g., "cotton sweatshirt")
   const materials = keywords.filter((w) =>
     ["cotton", "polyester", "silk", "wool", "nylon", "leather", "rubber",
-     "plastic", "steel", "aluminum", "glass", "ceramic", "wood"].includes(w)
-  );
-  const productTypes = keywords.filter((w) =>
-    ["sweatshirt", "shirt", "pants", "dress", "jacket", "shoe", "bag",
-     "earbuds", "headphones", "cable", "phone", "laptop", "toy",
-     "furniture", "hooded", "knitted", "woven", "blouse", "sweater",
-     "pullover", "trouser", "skirt", "coat", "hat", "glove", "sock"].includes(w)
+     "plastic", "steel", "aluminum", "glass", "ceramic", "wood", "linen",
+     "rayon", "acrylic", "spandex", "lycra", "denim", "fleece"].includes(w)
   );
 
-  if (materials.length > 0 && productTypes.length > 0) {
-    strategies.push(`${materials[0]} ${productTypes[0]}`);
+  const primaryMatches = keywords.filter((w) => primaryTypes.includes(w));
+  const modifierMatches = keywords.filter((w) => modifierTypes.includes(w));
+  const allProductTypes = [...primaryMatches, ...modifierMatches];
+
+  const strategies: string[] = [];
+
+  // Strategy 1: Each primary product type alone (most reliable for USITC)
+  for (const pt of primaryMatches) {
+    strategies.push(pt);
   }
 
-  // Strategy 2: First few meaningful keywords
-  strategies.push(keywords.slice(0, 3).join(" "));
-
-  // Strategy 3: Product type alone
-  if (productTypes.length > 0) {
-    strategies.push(productTypes[0]);
+  // Strategy 2: Material + primary product type combos
+  for (const mat of materials) {
+    for (const pt of primaryMatches) {
+      strategies.push(`${mat} ${pt}`);
+    }
   }
 
-  return [...new Set(strategies)];
+  // Strategy 3: Modifier + primary product type (e.g., "hooded sweatshirt")
+  for (const mod of modifierMatches) {
+    for (const pt of primaryMatches) {
+      strategies.push(`${mod} ${pt}`);
+    }
+  }
+
+  // Strategy 4: Material alone (broad fallback)
+  if (primaryMatches.length === 0 && materials.length > 0) {
+    strategies.push(materials[0]);
+  }
+
+  // Strategy 5: First meaningful keywords (fallback for unrecognized products)
+  if (strategies.length === 0) {
+    strategies.push(keywords.slice(0, 3).join(" "));
+    if (keywords.length > 0) strategies.push(keywords[0]);
+  }
+
+  // Deduplicate and cap at 5 strategies
+  return [...new Set(strategies)].slice(0, 5);
 }
