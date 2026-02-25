@@ -27,22 +27,37 @@ export interface ParsedHtsResult {
   indent: number;
 }
 
-const USITC_API_BASE = "https://hts.usitc.gov/reststop";
-
 /**
- * Search the USITC HTS database by keyword
+ * Search the USITC HTS database by keyword.
+ * Uses our server-side proxy (/api/hts-proxy) to avoid CORS issues,
+ * with a direct fallback for non-browser environments.
  */
 export async function searchHts(keyword: string): Promise<HtsSearchResult[]> {
-  const url = `${USITC_API_BASE}/search?keyword=${encodeURIComponent(keyword)}`;
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-  });
+  const proxyUrl = `/api/hts-proxy?keyword=${encodeURIComponent(keyword)}`;
+  const directUrl = `https://hts.usitc.gov/reststop/search?keyword=${encodeURIComponent(keyword)}`;
 
-  if (!response.ok) {
-    throw new Error(`USITC API error: ${response.status}`);
+  try {
+    const response = await fetch(proxyUrl, {
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Proxy error: ${response.status}`);
+    }
+
+    return response.json();
+  } catch {
+    // Fallback to direct USITC call (works in non-browser environments)
+    const response = await fetch(directUrl, {
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      throw new Error(`USITC API error: ${response.status}`);
+    }
+
+    return response.json();
   }
-
-  return response.json();
 }
 
 /**
