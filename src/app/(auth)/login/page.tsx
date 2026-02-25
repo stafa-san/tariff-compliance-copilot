@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { signIn, signInWithGoogle } from "@/lib/firebase/auth";
+import { signIn, signInWithGoogle, getAuthErrorMessage } from "@/lib/firebase/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,8 +24,8 @@ export default function LoginPage() {
     try {
       await signIn(email, password);
       router.push("/dashboard");
-    } catch {
-      setError("Invalid email or password.");
+    } catch (err) {
+      setError(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -37,8 +37,8 @@ export default function LoginPage() {
     try {
       await signInWithGoogle();
       router.push("/dashboard");
-    } catch {
-      setError("Google sign-in failed.");
+    } catch (err) {
+      setError(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
