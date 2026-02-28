@@ -2,6 +2,8 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 
+export const dynamic = "force-dynamic";
+
 export default function DashboardLayout({
   children,
 }: {
