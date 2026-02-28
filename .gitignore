@@ -39,3 +39,6 @@ next-env.d.ts
 
 # testing
 /coverage
+
+# HTS data sync temp files
+scripts/hts_full_raw.json

@@ -12,6 +12,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { searchLocalHTS } from "@/lib/services/hts-fallback";
 
 /* ------------------------------------------------------------------ */
 /* Tool 1: USITC HTS Lookup                                          */
@@ -28,34 +29,46 @@ export const lookupHtsCode = tool({
       .describe("HTS code or product keyword to search for in the USITC database"),
   }),
   execute: async ({ keyword }) => {
-    const url = `https://hts.usitc.gov/reststop/search?keyword=${encodeURIComponent(keyword)}`;
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-    });
+    // Try live USITC API first
+    try {
+      const url = `https://hts.usitc.gov/reststop/search?keyword=${encodeURIComponent(keyword)}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
 
-    if (!response.ok) {
-      return { error: `USITC API returned ${response.status}`, results: [] };
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(`USITC API returned ${response.status}`);
+      }
+
+      const raw: Record<string, unknown>[] = await response.json();
+
+      // Build rate inheritance (child entries inherit parent rates)
+      let lastGeneral = "";
+      const results = raw.slice(0, 15).map((r: Record<string, unknown>) => {
+        const general = r.general as string;
+        if (general) lastGeneral = general;
+        return {
+          htsCode: r.htsno as string,
+          description: r.description as string,
+          generalRate: general || lastGeneral || "See parent heading",
+          specialRate: (r.special as string) || "",
+          otherRate: (r.other as string) || "",
+          indent: r.indent as string,
+          units: r.units || [],
+        };
+      });
+
+      return { source: "live_usitc_api", resultCount: raw.length, results };
+    } catch {
+      // Fallback to local HTS data
+      console.warn("[lookup_hts_code] Live API failed, using local fallback for:", keyword);
+      return searchLocalHTS(keyword);
     }
-
-    const raw: Record<string, unknown>[] = await response.json();
-
-    // Build rate inheritance (child entries inherit parent rates)
-    let lastGeneral = "";
-    const results = raw.slice(0, 15).map((r: Record<string, unknown>) => {
-      const general = r.general as string;
-      if (general) lastGeneral = general;
-      return {
-        htsCode: r.htsno as string,
-        description: r.description as string,
-        generalRate: general || lastGeneral || "See parent heading",
-        specialRate: (r.special as string) || "",
-        otherRate: (r.other as string) || "",
-        indent: r.indent as string,
-        units: r.units || [],
-      };
-    });
-
-    return { resultCount: raw.length, results };
   },
 });
 
