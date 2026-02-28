@@ -13,6 +13,7 @@ import {
   ClipboardList,
   Settings,
   LogOut,
+  ScanSearch,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,6 +34,11 @@ const navItems = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "AI Audit Agent",
+    href: "/audit",
+    icon: ScanSearch,
   },
   {
     title: "Classify",
