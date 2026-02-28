@@ -235,40 +235,42 @@ export default function AuditPage() {
   const isLoading = status === "streaming" || status === "submitted";
 
   /* ---- Derived state from Claude's response ---- */
-  const assistantMessage = useMemo(
-    () => messages.filter((m) => m.role === "assistant").pop(),
+  const assistantMessages = useMemo(
+    () => messages.filter((m) => m.role === "assistant"),
     [messages],
   );
 
-  // Extract tool invocations from parts (AI SDK v6 UIMessage)
+  // Extract tool invocations from ALL assistant messages (multi-step tool calls span multiple messages)
   const toolInvocations = useMemo(() => {
-    if (!assistantMessage) return [];
-    const parts = assistantMessage.parts ?? [];
+    if (assistantMessages.length === 0) return [];
     const toolParts: { toolCallId: string; toolName: string; args: Record<string, unknown>; state: string; result?: unknown }[] = [];
 
-    for (const p of parts) {
-      const part = p as Record<string, unknown>;
-      const type = part.type as string;
-      if (!type?.startsWith("tool-") && type !== "dynamic-tool") continue;
+    for (const msg of assistantMessages) {
+      const parts = msg.parts ?? [];
+      for (const p of parts) {
+        const part = p as Record<string, unknown>;
+        const type = part.type as string;
+        if (!type?.startsWith("tool-") && type !== "dynamic-tool") continue;
 
-      const toolName = type === "dynamic-tool"
-        ? (part.toolName as string) || ""
-        : type.replace("tool-", "");
-      const args = ((part.input ?? part.args ?? {}) as Record<string, unknown>);
-      const output = part.output ?? part.result;
-      const state = output !== undefined ? "result" : "call";
+        const toolName = type === "dynamic-tool"
+          ? (part.toolName as string) || ""
+          : type.replace("tool-", "");
+        const args = ((part.input ?? part.args ?? {}) as Record<string, unknown>);
+        const output = part.output ?? part.result;
+        const state = output !== undefined ? "result" : "call";
 
-      toolParts.push({
-        toolCallId: (part.toolCallId as string) || "",
-        toolName,
-        args,
-        state,
-        result: output,
-      });
+        toolParts.push({
+          toolCallId: (part.toolCallId as string) || "",
+          toolName,
+          args,
+          state,
+          result: output,
+        });
+      }
     }
 
     return toolParts;
-  }, [assistantMessage]);
+  }, [assistantMessages]);
 
   const findings = useMemo<AuditFinding[]>(
     () =>
@@ -673,19 +675,24 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
           </Card>
 
           {/* Claude's streaming narrative */}
-          {assistantMessage &&
-            assistantMessage.parts
-              .filter((p): p is { type: "text"; text: string } => p.type === "text")
-              .some((p) => p.text.trim()) && (
+          {assistantMessages.length > 0 &&
+            assistantMessages.some((m) =>
+              m.parts
+                .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                .some((p) => p.text.trim()),
+            ) && (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Agent Analysis</CardTitle>
+                  <CardTitle className="text-base">Agent Summary</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="prose prose-sm max-w-none whitespace-pre-wrap">
-                    {assistantMessage.parts
-                      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-                      .map((p) => p.text)
+                    {assistantMessages
+                      .flatMap((m) =>
+                        m.parts
+                          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                          .map((p) => p.text),
+                      )
                       .join("")}
                   </div>
                 </CardContent>
@@ -937,19 +944,24 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
           </Card>
 
           {/* Claude's narrative summary */}
-          {assistantMessage &&
-            assistantMessage.parts
-              .filter((p): p is { type: "text"; text: string } => p.type === "text")
-              .some((p) => p.text.trim()) && (
+          {assistantMessages.length > 0 &&
+            assistantMessages.some((m) =>
+              m.parts
+                .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                .some((p) => p.text.trim()),
+            ) && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Agent Summary</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm">
-                    {assistantMessage.parts
-                      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-                      .map((p) => p.text)
+                    {assistantMessages
+                      .flatMap((m) =>
+                        m.parts
+                          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                          .map((p) => p.text),
+                      )
                       .join("")}
                   </div>
                 </CardContent>

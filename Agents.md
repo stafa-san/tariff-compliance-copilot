@@ -52,7 +52,7 @@ Each tool is defined with a Zod schema for type-safe input validation and a real
 
 | Tool | Purpose | Data Source |
 |------|---------|-------------|
-| `lookup_hts_code` | Validate HTS classification against official tariff schedule | **Live USITC REST API** (hts.usitc.gov) |
+| `lookup_hts_code` | Validate HTS classification against official tariff schedule | **Live USITC REST API** (hts.usitc.gov) with local fallback (~13,900 entries) |
 | `check_trade_remedies` | Determine Section 301, 232, AD/CVD applicability | Trade remedy schedules by country and HTS chapter |
 | `calculate_expected_duties` | Compute general duty + special tariffs + MPF + HMF | CBP fee formulas (MPF: 0.3464%, HMF: 0.125%) |
 | `report_finding` | Record individual audit finding with severity level | Agent's analysis (info/warning/error) |
@@ -74,12 +74,26 @@ The agent follows a structured 6-step audit workflow:
 
 6. **Risk Assessment** — Calculates an overall compliance risk score (0-100) with a risk level (Low/Medium/High) and actionable recommendations.
 
-### 3.4 Key Technical Decisions
+### 3.4 Data Resilience — USITC Fallback System
+
+The `lookup_hts_code` tool implements a two-tier data strategy:
+
+1. **Primary: Live USITC API** — Calls `hts.usitc.gov/reststop/search` with an 8-second timeout
+2. **Fallback: Local HTS database** — ~13,900 entries with duty rates, downloaded via `pnpm run sync-hts`
+
+Every response includes a `source` field (`"live_usitc_api"` or `"local_fallback"`) so the agent knows data provenance and can note it in findings.
+
+The sync script (`scripts/sync-hts-data.ts`) downloads the full HTS schedule from the USITC export API, processes it into an optimized lookup index, and records metadata (download timestamp, record counts, version). The USITC publishes revisions every 1-3 weeks.
+
+See [DATA_PROVENANCE.md](DATA_PROVENANCE.md) for complete data source documentation.
+
+### 3.5 Key Technical Decisions
 
 - **Streaming with Tool Calls**: The agent streams its responses to the UI in real-time, including tool call progress indicators, so users can watch the audit happen live.
 - **Server-Side Execution**: All tools execute server-side via Next.js API routes, keeping API keys secure and enabling direct calls to the USITC API without CORS issues.
 - **Autonomous Decision-Making**: The agent decides which tools to call and in what order based on the document content — it is not following a hardcoded script. Claude's reasoning determines the audit flow.
 - **Up to 15 steps per audit**: The `stopWhen: stepCountIs(15)` configuration allows Claude to make multiple sequential tool calls in a single audit session, enabling thorough multi-step analysis.
+- **Graceful Degradation**: If the live USITC API is unavailable, the agent automatically falls back to local data, ensuring audits complete even without internet access.
 
 ---
 
@@ -169,26 +183,62 @@ CBP penalties (up to 4× unpaid duties) create a strong enforcement incentive, b
 
 ---
 
-## 7. File Structure (AI Agent)
+## 7. Verified Audit Results (Live Test)
+
+The following results were produced by the live AI audit agent using real Claude API calls and the USITC database:
+
+**Test Case:** Men's UC Bearcats Hooded Sweatshirt (HTS 6110.20.2079, China origin, 500 pcs @ $18, ocean shipment)
+
+| Check | Severity | Result |
+|-------|----------|--------|
+| HTS Code Validation | info | HTS 6110.20.2079 validated in USITC database, 16.5% general rate confirmed |
+| General Duty Rate | info | 16.5% matches USITC database |
+| Section 301 Tariff | info | 7.5% under 9903.88.15 (List 4A) correctly applied |
+| Entered Value | info | $9,000 matches across documents |
+| Country of Origin | info | CN consistent on both documents |
+| Quantity Units | warning | Invoice shows 500 pieces, 7501 shows 500 DOZ — needs clarification |
+| MPF Calculation | warning | 7501 shows $31.18 but minimum is $31.67 — $0.49 underpayment |
+| HMF Assessment | error | 7501 shows $0 but HMF should be $11.25 for ocean shipment |
+| Total Duties | error | 7501 declares $2,191.18 but calculated total is $2,202.92 — $11.74 gap |
+| Merchandise Description | info | Descriptions consistent between documents |
+
+**AI Calculated Total:** $2,202.92 (effective rate: 24.48%)
+**7501 Declared Total:** $2,191.18
+**Difference:** $11.74 (primarily missing HMF + MPF underpayment)
+
+The agent autonomously performed 10 compliance checks, identified 2 errors and 2 warnings, and produced a complete duty breakdown — all from a single document submission.
+
+---
+
+## 8. File Structure (AI Agent)
 
 ```
 src/
 ├── app/
 │   ├── api/
-│   │   └── audit/
-│   │       └── route.ts          ← API route: Claude streaming + tool calling
+│   │   ├── audit/
+│   │   │   └── route.ts              ← API route: Claude streaming + tool calling
+│   │   └── hts-proxy/
+│   │       └── route.ts              ← Server-side USITC proxy (CORS bypass)
 │   └── (dashboard)/
 │       └── audit/
-│           └── page.tsx          ← Audit UI: upload, live progress, results
+│           └── page.tsx              ← Audit UI: upload, live progress, results
 ├── lib/
-│   └── ai/
-│       ├── audit-tools.ts        ← 5 tool definitions with Zod schemas
-│       └── audit-prompt.ts       ← System prompt with workflow + economics
+│   ├── ai/
+│   │   ├── audit-tools.ts            ← 5 tool definitions with Zod schemas
+│   │   └── audit-prompt.ts           ← System prompt with workflow + economics
+│   ├── data/
+│   │   └── hts-lookup.json           ← Local HTS fallback (~13,900 entries)
+│   └── services/
+│       └── hts-fallback.ts           ← Offline HTS search service
+scripts/
+└── sync-hts-data.ts                  ← USITC data download + processing script
+DATA_PROVENANCE.md                    ← Data source documentation
 ```
 
 ---
 
-## 8. How to Run
+## 9. How to Run
 
 ```bash
 # Install dependencies
@@ -197,6 +247,9 @@ pnpm install
 # Set environment variables
 cp .env.example .env.local
 # Add: ANTHROPIC_API_KEY=sk-ant-...
+
+# Download latest USITC HTS data (for local fallback)
+pnpm run sync-hts
 
 # Start development server
 pnpm dev
@@ -207,7 +260,7 @@ pnpm build
 
 ---
 
-## 9. Claude API Integration Details
+## 10. Claude API Integration Details
 
 ### Model Configuration
 ```typescript
@@ -238,7 +291,7 @@ return result.toUIMessageStreamResponse();
 
 ---
 
-## 10. Team
+## 11. Team
 
 **Submission by:** Tariff Compliance Copilot Team
 **Competition:** Agentic AI Challenge — Kautz-Uible Economics Institute
