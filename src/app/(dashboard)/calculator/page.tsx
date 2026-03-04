@@ -59,14 +59,34 @@ export default function CalculatorPage() {
     setHtsLookup("loading");
 
     try {
-      // Search USITC with the first 4 digits (heading) for broader match
+      // For 10-digit codes like 6110.20.2079, the USITC API indexes by the
+      // 8-digit tariff line (6110.20.20), not the full 10-digit stat suffix.
+      // Search with the 8-digit prefix (first 4 digits as heading) for best results.
+      const heading = clean.slice(0, 4); // e.g. "6110"
       const searchTerm = code.replace(/[\s]/g, "");
-      const results = await searchHts(searchTerm);
+      const results = await searchHts(searchTerm.length > 10 ? heading : searchTerm);
 
-      // Try exact match first, then prefix match
-      const exact = results.find((r) => r.htsno.replace(/[\s.-]/g, "") === clean);
-      const prefix = results.find((r) => r.htsno.replace(/[\s.-]/g, "").startsWith(clean));
-      const match = exact || prefix;
+      // Try exact match on full code, then 8-digit prefix, then 6-digit, then 4-digit
+      const findMatch = () => {
+        // Exact match on full code
+        const exact = results.find((r) => r.htsno.replace(/[\s.-]/g, "") === clean);
+        if (exact) return exact;
+        // Match on 8-digit tariff line (strip 2-digit stat suffix)
+        if (clean.length >= 10) {
+          const eightDigit = clean.slice(0, 8);
+          const m = results.find((r) => r.htsno.replace(/[\s.-]/g, "") === eightDigit);
+          if (m) return m;
+        }
+        // Prefix match — find longest matching code
+        return results
+          .filter((r) => {
+            const rc = r.htsno.replace(/[\s.-]/g, "");
+            return clean.startsWith(rc) || rc.startsWith(clean);
+          })
+          .sort((a, b) => b.htsno.length - a.htsno.length)[0] || null;
+      };
+
+      const match = findMatch();
 
       if (match && match.general) {
         const rate = parseDutyRate(match.general);
@@ -81,6 +101,35 @@ export default function CalculatorPage() {
         if (has301 && !section301Rate) {
           setSection301Rate("7.5");
         }
+        // Check footnotes for Section 232
+        const has232 = match.footnotes?.some(
+          (fn) => fn.value && /9903\.8[015]/.test(fn.value)
+        );
+        if (has232 && !section232Rate) {
+          // Detect steel vs aluminum from chapter
+          const ch = clean.slice(0, 2);
+          if (ch === "76") setSection232Rate("10");
+          else if (ch === "72" || ch === "73") setSection232Rate("25");
+        }
+      } else if (clean.length >= 8) {
+        // If full code search failed, retry with just the heading
+        const headingResults = await searchHts(heading);
+        const headingMatch = headingResults
+          .filter((r) => {
+            const rc = r.htsno.replace(/[\s.-]/g, "");
+            return clean.startsWith(rc) || rc.startsWith(clean.slice(0, 8));
+          })
+          .sort((a, b) => b.htsno.length - a.htsno.length)[0];
+
+        if (headingMatch && headingMatch.general) {
+          const rate = parseDutyRate(headingMatch.general);
+          setDutyRate(rate > 0 ? rate.toString() : headingMatch.general === "Free" ? "0" : "");
+          setHtsDescription(headingMatch.description);
+          setHtsLookup("found");
+        } else {
+          setHtsLookup("not-found");
+          setHtsDescription("");
+        }
       } else {
         setHtsLookup("not-found");
         setHtsDescription("");
@@ -89,7 +138,7 @@ export default function CalculatorPage() {
       setHtsLookup("not-found");
       setHtsDescription("");
     }
-  }, [section301Rate]);
+  }, [section301Rate, section232Rate]);
 
   const handleHtsChange = (value: string) => {
     setHtsCode(value);

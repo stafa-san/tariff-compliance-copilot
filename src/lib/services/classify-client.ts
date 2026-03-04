@@ -100,18 +100,49 @@ export async function classifyProduct(
   const primary = scored[0];
   const alternatives = scored.slice(1, 4);
 
-  // Section 301 tariffs
+  // Determine applicable special tariffs
   const section301 = SECTION_301_COUNTRIES[countryOfOrigin];
   const specialTariffs: ClassifyResult["classification"] extends null
     ? never
     : NonNullable<ClassifyResult["classification"]>["specialTariffs"] = [];
 
+  const chapter = primary.htsCode.replace(/\./g, "").slice(0, 2);
+
+  // Section 122 — applies to all countries (customs user fee / processing)
+  specialTariffs.push({
+    name: "Section 122 (Customs User Fee)",
+    rate: 0.3464,
+    authority: "CBP",
+    htsProvision: "19 USC §58c",
+  });
+
+  // Section 301 tariffs (China)
   if (section301) {
     specialTariffs.push({
       name: `Section 301 ${section301.list}`,
       rate: section301.rate,
       authority: "USTR",
       htsProvision: "9903.88.15",
+    });
+  }
+
+  // Section 232 tariffs (steel and aluminum — all countries)
+  const steelChapters = ["72", "73"];
+  const aluminumChapter = "76";
+  if (steelChapters.includes(chapter)) {
+    specialTariffs.push({
+      name: "Section 232 (Steel)",
+      rate: 25,
+      authority: "DOC/BIS",
+      htsProvision: "9903.80.01",
+    });
+  }
+  if (chapter === aluminumChapter) {
+    specialTariffs.push({
+      name: "Section 232 (Aluminum)",
+      rate: 10,
+      authority: "DOC/BIS",
+      htsProvision: "9903.85.01",
     });
   }
 
@@ -224,11 +255,24 @@ function buildReasoning(
     steps.push(`Special program rates available: ${primary.specialRate}`);
   }
 
+  steps.push(
+    `Section 122 Customs User Fee (0.3464%) applies to all imports regardless of country of origin`
+  );
+
   if (section301) {
     steps.push(
       `Country of origin ${COUNTRY_NAMES[countryCode] || countryCode} triggers Section 301 tariff (${section301.list}) at ${section301.rate}% additional duty`
     );
-  } else {
+  }
+
+  const ch = primary.htsCode.replace(/\./g, "").slice(0, 2);
+  if (["72", "73"].includes(ch)) {
+    steps.push(`Chapter ${ch} product subject to Section 232 steel tariff at 25%`);
+  } else if (ch === "76") {
+    steps.push(`Chapter ${ch} product subject to Section 232 aluminum tariff at 10%`);
+  }
+
+  if (!section301 && !["72", "73", "76"].includes(ch)) {
     steps.push(
       `No additional Section 301/232 tariffs apply for ${COUNTRY_NAMES[countryCode] || countryCode}`
     );

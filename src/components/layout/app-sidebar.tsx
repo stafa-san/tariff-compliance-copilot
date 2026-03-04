@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Search,
   Calculator,
-  Ship,
   Settings,
   LogOut,
   ScanSearch,
@@ -46,11 +45,6 @@ const navItems = [
     title: "Calculator",
     href: "/calculator",
     icon: Calculator,
-  },
-  {
-    title: "Shipments",
-    href: "/shipments",
-    icon: Ship,
   },
 ];
 

@@ -1,4 +1,4 @@
-import { PDFParse } from "pdf-parse";
+import { extractText } from "unpdf";
 
 export async function POST(req: Request) {
   try {
@@ -9,13 +9,12 @@ export async function POST(req: Request) {
       return Response.json({ error: "No file provided" }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const parser = new PDFParse({ data: buffer });
-    const result = await parser.getText();
+    const arrayBuffer = await file.arrayBuffer();
+    const { text, totalPages } = await extractText(new Uint8Array(arrayBuffer));
 
     return Response.json({
-      text: result.text,
-      pages: result.pages.length,
+      text,
+      pages: totalPages,
       fileName: file.name,
     });
   } catch (err) {

@@ -1,46 +1,50 @@
 import {
-  Ship,
+  ScanSearch,
   AlertTriangle,
   DollarSign,
   FileCheck,
   ArrowRight,
   Search,
   Calculator,
-  BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 const stats = [
   {
-    title: "Active Shipments",
-    value: "0",
-    description: "In progress",
-    icon: Ship,
+    title: "AI Audits",
+    value: "—",
+    description: "Run an audit to get started",
+    icon: ScanSearch,
   },
   {
     title: "Pending Reviews",
-    value: "0",
+    value: "—",
     description: "Need attention",
     icon: AlertTriangle,
   },
   {
     title: "Total Duties",
-    value: "$0.00",
+    value: "—",
     description: "This month",
     icon: DollarSign,
   },
   {
-    title: "Reports Generated",
-    value: "0",
+    title: "Classifications",
+    value: "—",
     description: "All time",
     icon: FileCheck,
   },
 ];
 
 const quickActions = [
+  {
+    title: "AI Audit Agent",
+    description: "Upload trade documents for AI-powered compliance audit",
+    href: "/audit",
+    icon: ScanSearch,
+  },
   {
     title: "Classify a Product",
     description: "Get AI-powered HTS code classification",
@@ -52,12 +56,6 @@ const quickActions = [
     description: "Compute landed cost and duty breakdown",
     href: "/calculator",
     icon: Calculator,
-  },
-  {
-    title: "Run a Scenario",
-    description: "Compare sourcing countries and tariff impacts",
-    href: "/scenarios",
-    icon: BarChart3,
   },
 ];
 
@@ -126,51 +124,31 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent Activity (placeholder) */}
+      {/* Recent Activity */}
       <Card>
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>
-          <CardDescription>Your latest classifications, shipments, and reports</CardDescription>
+          <CardDescription>Your latest audits and classifications</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-10 text-center">
-            <Ship className="mb-4 h-12 w-12 text-muted-foreground/30" />
+            <ScanSearch className="mb-4 h-12 w-12 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">
-              No activity yet. Start by classifying a product or creating a shipment.
+              No activity yet. Start by running an AI audit or classifying a product.
             </p>
             <div className="mt-4 flex gap-2">
+              <Link href="/audit">
+                <Button size="sm">
+                  Run AI Audit
+                </Button>
+              </Link>
               <Link href="/classify">
                 <Button size="sm" variant="outline">
                   Classify Product
                 </Button>
               </Link>
-              <Link href="/shipments">
-                <Button size="sm">
-                  New Shipment
-                </Button>
-              </Link>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Test Data Banner */}
-      <Card className="border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950">
-        <CardContent className="flex items-center gap-4 pt-6">
-          <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-            Test Data
-          </Badge>
-          <div className="flex-1">
-            <p className="text-sm font-medium">Sample: UC Bearcats Hooded Sweatshirts</p>
-            <p className="text-xs text-muted-foreground">
-              HTS 6110.20.2079 | Origin: China | 500 pcs @ $18/unit | General 16.5% + Section 301 7.5%
-            </p>
-          </div>
-          <Link href="/classify">
-            <Button size="sm" variant="outline">
-              Try It
-            </Button>
-          </Link>
         </CardContent>
       </Card>
     </div>
