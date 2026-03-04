@@ -8,9 +8,6 @@ import {
   Search,
   Calculator,
   Ship,
-  BarChart3,
-  FileText,
-  ClipboardList,
   Settings,
   LogOut,
   ScanSearch,
@@ -54,21 +51,6 @@ const navItems = [
     title: "Shipments",
     href: "/shipments",
     icon: Ship,
-  },
-  {
-    title: "Scenarios",
-    href: "/scenarios",
-    icon: BarChart3,
-  },
-  {
-    title: "Reports",
-    href: "/reports",
-    icon: FileText,
-  },
-  {
-    title: "Form 7501",
-    href: "/form-7501",
-    icon: ClipboardList,
   },
 ];
 

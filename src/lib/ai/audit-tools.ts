@@ -144,27 +144,68 @@ export const checkTradeRemedies = tool({
       }
     }
 
-    // Section 232 tariffs (steel and aluminum)
-    const steelPrefixes = [
+    // Section 232 tariffs — comprehensive HTS code coverage
+    // Steel core (Ch. 72): semi-finished, flat-rolled, bars, wire, tubes
+    const steelCorePrefixes = [
       "7206", "7207", "7208", "7209", "7210", "7211", "7212",
       "7213", "7214", "7215", "7216", "7217", "7218", "7219",
       "7220", "7221", "7222", "7223", "7224", "7225", "7226",
       "7227", "7228", "7229",
     ];
-    const aluminumPrefixes = ["7601", "7604", "7605", "7606", "7607", "7608", "7609"];
+    // Steel articles (Ch. 73): sheet piling, rail, tubes, pipes, fittings
+    const steelArticlePrefixes = [
+      "7301", "7302", "7303", "7304", "7305", "7306",
+      "7307", "7308", "7309", "7310", "7311", "7312",
+      "7313", "7314", "7315", "7316",
+    ];
+    // Steel derivatives (Ch. 73 continued): nails, screws, wire products, springs, kitchenware
+    const steelDerivativePrefixes = [
+      "7317", "7318", "7319", "7320", "7321", "7322",
+      "7323", "7324", "7325", "7326",
+    ];
+    // Aluminum (Ch. 76): unwrought, plates, foil, tubes, structures
+    const aluminumPrefixes = [
+      "7601", "7602", "7603", "7604", "7605", "7606",
+      "7607", "7608", "7609", "7610", "7611", "7612",
+      "7613", "7614", "7615", "7616",
+    ];
 
-    if (steelPrefixes.some((p) => htsCode.startsWith(p))) {
+    const isSteel25 = steelCorePrefixes.some((p) => htsCode.startsWith(p)) ||
+      steelArticlePrefixes.some((p) => htsCode.startsWith(p));
+    const isSteelDerivative = steelDerivativePrefixes.some((p) => htsCode.startsWith(p));
+    const isAluminum = aluminumPrefixes.some((p) => htsCode.startsWith(p));
+
+    if (isSteel25) {
       remedies.push({
         type: "Section 232",
         rate: 25,
+        htsProvision: "9903.80.01",
         authority: "DOC/BIS",
-        note: "25% tariff on steel imports for national security",
+        note: "25% tariff on steel imports (Ch. 72-73 core) for national security",
       });
     }
-    if (aluminumPrefixes.some((p) => htsCode.startsWith(p))) {
+    if (isSteelDerivative) {
+      // Steel derivatives can have both the base 232 rate AND derivative surcharge
+      remedies.push({
+        type: "Section 232 (Derivative)",
+        rate: 25,
+        htsProvision: "9903.80.01",
+        authority: "DOC/BIS",
+        note: "25% base Section 232 tariff on steel derivative articles",
+      });
+      remedies.push({
+        type: "Section 232 Derivative Surcharge",
+        rate: 25,
+        htsProvision: "9903.81.90",
+        authority: "DOC/BIS",
+        note: "Additional 25% derivative tariff (total 50%) on steel derivative articles (HTS 7317-7326)",
+      });
+    }
+    if (isAluminum) {
       remedies.push({
         type: "Section 232",
         rate: 10,
+        htsProvision: "9903.85.01",
         authority: "DOC/BIS",
         note: "10% tariff on aluminum imports for national security",
       });

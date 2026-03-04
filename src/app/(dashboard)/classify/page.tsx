@@ -4,11 +4,13 @@ import { useState } from "react";
 import { Search, Loader2, Sparkles, ExternalLink, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { classifyProduct, type ClassifyResult } from "@/lib/services/classify-client";
 
 const SAMPLE_COUNTRIES = [
@@ -52,6 +54,10 @@ interface ClassificationResult {
 
 export default function ClassifyPage() {
   const [productDescription, setProductDescription] = useState("");
+  const [materialComposition, setMaterialComposition] = useState("");
+  const [intendedUse, setIntendedUse] = useState("");
+  const [declaredValue, setDeclaredValue] = useState("");
+  const [quantity, setQuantity] = useState("");
   const [countryOfOrigin, setCountryOfOrigin] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ClassificationResult | null>(null);
@@ -66,7 +72,11 @@ export default function ClassifyPage() {
     setError("");
 
     try {
-      const data: ClassifyResult = await classifyProduct(productDescription, countryOfOrigin);
+      // Build enriched description with all fields
+      let enrichedDesc = productDescription;
+      if (materialComposition) enrichedDesc += ` | Material: ${materialComposition}`;
+      if (intendedUse) enrichedDesc += ` | Use: ${intendedUse}`;
+      const data: ClassifyResult = await classifyProduct(enrichedDesc, countryOfOrigin);
 
       if (!data.classification) {
         setError(data.message || "No matching HTS codes found. Try a more specific description.");
@@ -85,8 +95,12 @@ export default function ClassifyPage() {
 
   const loadSampleData = () => {
     setProductDescription(
-      "Men's University of Cincinnati \"Bearcats\" Hooded Sweatshirt — 80% Cotton / 20% Polyester — Screen-printed red and black UC Bearcats logo — Adult sizes S-XL — Used as collegiate athletic fan apparel"
+      "Men's University of Cincinnati \"Bearcats\" Hooded Sweatshirt — Screen-printed red and black UC Bearcats logo — Adult sizes S-XL"
     );
+    setMaterialComposition("80% Cotton / 20% Polyester");
+    setIntendedUse("Collegiate athletic fan apparel");
+    setDeclaredValue("9000");
+    setQuantity("500 pieces");
     setCountryOfOrigin("CN");
   };
 
@@ -137,6 +151,51 @@ export default function ClassifyPage() {
                   required
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="material">Material Composition</Label>
+                <Input
+                  id="material"
+                  placeholder="e.g., 80% Cotton / 20% Polyester, Stainless Steel 304..."
+                  value={materialComposition}
+                  onChange={(e) => setMaterialComposition(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="use">Intended Use</Label>
+                <Input
+                  id="use"
+                  placeholder="e.g., Athletic fan apparel, Kitchen cookware..."
+                  value={intendedUse}
+                  onChange={(e) => setIntendedUse(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="value">Declared Value (USD)</Label>
+                  <Input
+                    id="value"
+                    type="number"
+                    step="0.01"
+                    placeholder="9000.00"
+                    value={declaredValue}
+                    onChange={(e) => setDeclaredValue(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qty">Quantity</Label>
+                  <Input
+                    id="qty"
+                    placeholder="e.g., 500 pieces"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <Separator />
 
               <div className="space-y-2">
                 <Label htmlFor="country">Country of Origin</Label>
@@ -295,6 +354,40 @@ export default function ClassifyPage() {
                   <div className="text-xs text-muted-foreground">
                     Origin: {result.countryName} ({result.countryOfOrigin})
                   </div>
+
+                  {declaredValue && result.generalDutyRate > 0 && (
+                    <>
+                      <Separator />
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium">Estimated Duty Summary</p>
+                        <div className="rounded-lg bg-muted/50 p-2 space-y-0.5 text-xs">
+                          <div className="flex justify-between">
+                            <span>Declared Value</span>
+                            <span className="font-medium">${parseFloat(declaredValue).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>General Duty ({result.generalDutyRate}%)</span>
+                            <span>${(parseFloat(declaredValue) * result.generalDutyRate / 100).toFixed(2)}</span>
+                          </div>
+                          {result.specialTariffs.map((t) => (
+                            <div key={t.name} className="flex justify-between text-orange-600">
+                              <span>{t.name} ({t.rate}%)</span>
+                              <span>${(parseFloat(declaredValue) * t.rate / 100).toFixed(2)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between border-t pt-0.5 font-medium">
+                            <span>Est. Total Duties</span>
+                            <span>
+                              ${(
+                                parseFloat(declaredValue) * result.generalDutyRate / 100 +
+                                result.specialTariffs.reduce((sum, t) => sum + parseFloat(declaredValue) * t.rate / 100, 0)
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
 

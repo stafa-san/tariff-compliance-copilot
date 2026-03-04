@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import {
   ScanSearch,
   Upload,
@@ -30,53 +30,6 @@ import { Badge } from "@/components/ui/badge";
 /* Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface InvoiceData {
-  invoiceNumber: string;
-  date: string;
-  seller: { name: string; address: string; country: string };
-  buyer: { name: string; address: string };
-  items: {
-    description: string;
-    htsCode: string;
-    quantity: number;
-    unitPrice: number;
-    totalPrice: number;
-    countryOfOrigin: string;
-    material: string;
-  }[];
-  totalValue: number;
-  currency: string;
-  shippingMethod: string;
-  portOfExport: string;
-  portOfImport: string;
-  incoterms: string;
-}
-
-interface Form7501Data {
-  entryNumber: string;
-  entryType: string;
-  summaryDate: string;
-  portCode: string;
-  importingCarrier: string;
-  modeOfTransport: string;
-  countryOfOrigin: string;
-  manufacturerId: string;
-  exportingCountry: string;
-  importDate: string;
-  htsCode: string;
-  descriptionOfMerchandise: string;
-  grossWeight: string;
-  netQuantity: string;
-  enteredValue: number;
-  dutyRate: string;
-  section301Code: string;
-  section301Rate: string;
-  totalDuty: number;
-  mpf: number;
-  hmf: number;
-  totalFees: number;
-}
-
 interface AuditFinding {
   field: string;
   severity: "info" | "warning" | "error";
@@ -86,68 +39,6 @@ interface AuditFinding {
   form7501Value?: string;
   recommendation?: string;
 }
-
-/* ------------------------------------------------------------------ */
-/* Sample data (UC Bearcats Sweatshirt — from reference invoices)     */
-/* ------------------------------------------------------------------ */
-
-const SAMPLE_INVOICE: InvoiceData = {
-  invoiceNumber: "GEA-2025-0847",
-  date: "2025-01-15",
-  seller: {
-    name: "Guangzhou Elite Apparel Manufacturing Co., Ltd.",
-    address: "No. 88 Huacheng Avenue, Tianhe District, Guangzhou, 510623",
-    country: "CN",
-  },
-  buyer: {
-    name: "UC Campus Bookstore / University of Cincinnati",
-    address: "2600 Clifton Ave, Cincinnati, OH 45221",
-  },
-  items: [
-    {
-      description:
-        "Men's University of Cincinnati Bearcats Hooded Sweatshirt — 80% Cotton / 20% Polyester, screen-printed red and black UC Bearcats logo, adult sizes S-XL",
-      htsCode: "6110.20.2079",
-      quantity: 500,
-      unitPrice: 18.0,
-      totalPrice: 9000.0,
-      countryOfOrigin: "CN",
-      material: "80% Cotton / 20% Polyester",
-    },
-  ],
-  totalValue: 9000.0,
-  currency: "USD",
-  shippingMethod: "ocean",
-  portOfExport: "Guangzhou, China",
-  portOfImport: "Los Angeles, CA",
-  incoterms: "FOB Guangzhou",
-};
-
-const SAMPLE_7501: Form7501Data = {
-  entryNumber: "ABC-1234567-8",
-  entryType: "01",
-  summaryDate: "2025-02-01",
-  portCode: "2704",
-  importingCarrier: "COSCO Shipping",
-  modeOfTransport: "11",
-  countryOfOrigin: "CN",
-  manufacturerId: "CNGUAELITAPP",
-  exportingCountry: "CN",
-  importDate: "2025-01-28",
-  htsCode: "6110.20.2079",
-  descriptionOfMerchandise:
-    "Men's cotton hooded sweatshirts, knitted, with screen-printed logos",
-  grossWeight: "350 KG",
-  netQuantity: "500 DOZ",
-  enteredValue: 9000.0,
-  dutyRate: "16.5%",
-  section301Code: "9903.88.15",
-  section301Rate: "7.5%",
-  totalDuty: 2191.18,
-  mpf: 31.18,
-  hmf: 0,
-  totalFees: 2191.18,
-};
 
 /* ------------------------------------------------------------------ */
 /* Tool-call UI configuration                                         */
@@ -190,7 +81,7 @@ const TOOL_CONFIG: Record<
 };
 
 /* ------------------------------------------------------------------ */
-/* Helper components                                                   */
+/* Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
 function SeverityIcon({ severity }: { severity: string }) {
@@ -215,16 +106,33 @@ function severityBg(severity: string) {
   }
 }
 
+async function extractPdfText(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/extract-pdf", { method: "POST", body: formData });
+  if (!res.ok) throw new Error("PDF extraction failed");
+  const data = await res.json();
+  return data.text as string;
+}
+
 /* ------------------------------------------------------------------ */
-/* Main page                                                           */
+/* Main page                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function AuditPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null);
-  const [form7501Data, setForm7501Data] = useState<Form7501Data | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [form7501File, setForm7501File] = useState<File | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState("");
+  // Store raw extracted text for the prompt
+  const invoiceTextRef = useRef<string>("");
+  const form7501TextRef = useRef<string>("");
+  // Store broker name extracted from 7501 for CSV
+  const brokerNameRef = useRef<string>("");
+
+  const invoiceInputRef = useRef<HTMLInputElement>(null);
+  const form7501InputRef = useRef<HTMLInputElement>(null);
 
   /* ---- Claude AI chat (agentic tool-calling) ---- */
   const { messages, sendMessage, status, error } = useChat({
@@ -240,10 +148,15 @@ export default function AuditPage() {
     [messages],
   );
 
-  // Extract tool invocations from ALL assistant messages (multi-step tool calls span multiple messages)
   const toolInvocations = useMemo(() => {
     if (assistantMessages.length === 0) return [];
-    const toolParts: { toolCallId: string; toolName: string; args: Record<string, unknown>; state: string; result?: unknown }[] = [];
+    const toolParts: {
+      toolCallId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+      state: string;
+      result?: unknown;
+    }[] = [];
 
     for (const msg of assistantMessages) {
       const parts = msg.parts ?? [];
@@ -252,10 +165,11 @@ export default function AuditPage() {
         const type = part.type as string;
         if (!type?.startsWith("tool-") && type !== "dynamic-tool") continue;
 
-        const toolName = type === "dynamic-tool"
-          ? (part.toolName as string) || ""
-          : type.replace("tool-", "");
-        const args = ((part.input ?? part.args ?? {}) as Record<string, unknown>);
+        const toolName =
+          type === "dynamic-tool"
+            ? (part.toolName as string) || ""
+            : type.replace("tool-", "");
+        const args = (part.input ?? part.args ?? {}) as Record<string, unknown>;
         const output = part.output ?? part.result;
         const state = output !== undefined ? "result" : "call";
 
@@ -268,7 +182,6 @@ export default function AuditPage() {
         });
       }
     }
-
     return toolParts;
   }, [assistantMessages]);
 
@@ -304,8 +217,10 @@ export default function AuditPage() {
     return inv?.result as
       | {
           totalDuties: string;
+          enteredValue: string;
           generalDuty: { rate: string; amount: string };
           section301: { rate: string; amount: string; applicable: boolean };
+          section232: { rate: string; amount: string; applicable: boolean };
           mpf: { rate: string; amount: string };
           hmf: { rate: string; amount: string };
           effectiveDutyRate: string;
@@ -314,83 +229,148 @@ export default function AuditPage() {
       | undefined;
   }, [toolInvocations]);
 
-  /* ---- Handlers ---- */
-  const loadSample = useCallback(() => {
-    setInvoiceData(SAMPLE_INVOICE);
-    setForm7501Data(SAMPLE_7501);
-    setInvoiceFile(
-      new File(["sample"], "Commercial-Invoice-UC-Bearcats.pdf", {
-        type: "application/pdf",
-      }),
-    );
-    setForm7501File(
-      new File(["sample"], "CBP-Form-7501-Entry-Summary.pdf", {
-        type: "application/pdf",
-      }),
-    );
+  /* ---- File handlers ---- */
+  const handleFileSelect = useCallback(
+    (file: File, type: "invoice" | "form7501") => {
+      if (type === "invoice") setInvoiceFile(file);
+      else setForm7501File(file);
+      setExtractError("");
+    },
+    [],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, type: "invoice" | "form7501") => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file) handleFileSelect(file, type);
+    },
+    [handleFileSelect],
+  );
+
+  const preventDefault = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
   }, []);
 
+  /* ---- Run audit: extract PDFs then send raw text to Claude ---- */
   const runAudit = useCallback(async () => {
-    if (!invoiceData || !form7501Data) return;
-    setStep(2);
+    if (!invoiceFile || !form7501File) return;
+    setExtracting(true);
+    setExtractError("");
 
-    const prompt = `Please perform a complete compliance audit of the following trade documents.
+    try {
+      // Extract text from both PDFs in parallel
+      const [invoiceText, form7501Text] = await Promise.all([
+        extractPdfText(invoiceFile),
+        extractPdfText(form7501File),
+      ]);
 
-## Commercial Invoice
-${JSON.stringify(invoiceData, null, 2)}
+      invoiceTextRef.current = invoiceText;
+      form7501TextRef.current = form7501Text;
 
-## CBP Form 7501 (Entry Summary)
-${JSON.stringify(form7501Data, null, 2)}
+      // Try to extract broker name from 7501 text
+      const brokerMatch = form7501Text.match(
+        /(?:Broker\/Filer|Broker)[^\n]*\n\s*([^\n]+)/i,
+      );
+      brokerNameRef.current = brokerMatch?.[1]?.trim() || "Unknown Broker";
 
-Follow your complete audit workflow: validate the HTS code against the USITC database, check for applicable trade remedies (Section 301/232), calculate expected duties and fees, cross-check all fields between the invoice and 7501, report each finding, and finally calculate the overall compliance risk score.`;
+      setStep(2);
 
-    sendMessage({ text: prompt });
-  }, [invoiceData, form7501Data, sendMessage]);
+      const prompt = `Please perform a complete compliance audit by thoroughly analyzing the EXACT content of these two uploaded trade documents. Do NOT use any pre-loaded or sample data — analyze ONLY what is written in these documents.
+
+## DOCUMENT 1 — Commercial Invoice (extracted text from uploaded PDF)
+\`\`\`
+${invoiceText}
+\`\`\`
+
+## DOCUMENT 2 — CBP Form 7501 Entry Summary (extracted text from uploaded PDF)
+\`\`\`
+${form7501Text}
+\`\`\`
+
+## INSTRUCTIONS
+1. Read every field from BOTH documents carefully. Extract all HTS codes, values, quantities, units, rates, country of origin, broker info, carrier, ports, dates, and any other data present.
+2. Pay attention to the ACTUAL units on the invoice (e.g., "Units", "pieces", "kg", "doz") — do not assume units.
+3. The 7501 may list MULTIPLE HTS lines (including Section 301/232 provisions like 9903.88.15, 9903.03.01, 9903.81.90). Analyze ALL of them.
+4. Use your tools to validate each HTS code against the USITC database.
+5. Check for trade remedies (Section 301, 232, AD/CVD) based on the actual country of origin and product.
+6. Calculate expected duties using the ACTUAL entered value and rates from the documents.
+7. Cross-check EVERY field between the two documents — flag anything missing, inconsistent, or incorrect.
+8. Note anything unusual or that doesn't make sense (wrong units, missing fields, math errors, etc.).
+9. Report each finding individually, then calculate the risk score.
+
+Follow your complete audit workflow. Be thorough and precise — this is a real compliance audit.`;
+
+      sendMessage({ text: prompt });
+    } catch {
+      setExtractError(
+        "Failed to extract text from one or both PDFs. Please ensure they are valid PDF files.",
+      );
+    } finally {
+      setExtracting(false);
+    }
+  }, [invoiceFile, form7501File, sendMessage]);
 
   const resetAudit = useCallback(() => {
     setStep(1);
-    setInvoiceData(null);
-    setForm7501Data(null);
     setInvoiceFile(null);
     setForm7501File(null);
+    setExtractError("");
+    invoiceTextRef.current = "";
+    form7501TextRef.current = "";
+    brokerNameRef.current = "";
     window.location.reload();
   }, []);
 
+  /* ---- CSV Export — first column = Broker from 7501 ---- */
   const exportCSV = useCallback(() => {
     const headers = [
       "Broker Name",
       "Entry Number",
       "Entry Type",
-      "HTS Code",
+      "HTS Code(s)",
       "Country of Origin",
       "Entered Value",
       "General Duty Rate",
       "Section 301 Rate",
+      "Section 232 Rate",
       "Total Duties (Calculated)",
       "Total Duties (7501)",
       "Discrepancy",
       "Risk Level",
+      "Risk Score",
       "Findings Summary",
-      "Notes/Insights",
+      "Recommendation",
     ];
 
+    // Extract key data from findings and tool results
     const errors = findings.filter((f) => f.severity === "error");
     const discrepancy =
       errors.length > 0 ? errors.map((e) => e.title).join("; ") : "None";
 
+    // Try to parse entry number and other fields from 7501 text
+    const text7501 = form7501TextRef.current;
+    const entryMatch = text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z0-9-]+)/i);
+    const originMatch = text7501.match(/Country of Origin\s*\n?\s*([A-Z]{2})/i);
+
     const row = [
-      "AI Audit Agent",
-      form7501Data?.entryNumber || "",
-      form7501Data?.entryType || "01",
-      form7501Data?.htsCode || "",
-      form7501Data?.countryOfOrigin || "",
-      `$${form7501Data?.enteredValue?.toFixed(2) || "0.00"}`,
-      form7501Data?.dutyRate || "",
-      form7501Data?.section301Rate || "",
+      brokerNameRef.current || "Unknown Broker",
+      entryMatch?.[1] || "",
+      "01",
+      findings
+        .filter((f) => f.field === "HTS Code")
+        .map((f) => f.form7501Value || "")
+        .join("; ") || "",
+      originMatch?.[1] || "",
+      dutyResult?.enteredValue ? `$${dutyResult.enteredValue}` : "",
+      dutyResult?.generalDuty?.rate || "",
+      dutyResult?.section301?.applicable ? dutyResult.section301.rate : "N/A",
+      dutyResult?.section232?.applicable ? dutyResult.section232.rate : "N/A",
       dutyResult ? `$${dutyResult.totalDuties}` : "",
-      `$${form7501Data?.totalFees?.toFixed(2) || "0.00"}`,
+      "", // 7501 declared total extracted from findings
       discrepancy,
       riskResult?.level || "N/A",
+      riskResult?.riskScore?.toString() || "",
       findings.map((f) => `[${f.severity}] ${f.title}`).join("; "),
       riskResult?.recommendation || "",
     ];
@@ -405,31 +385,10 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `audit-report-${form7501Data?.entryNumber || "export"}.csv`;
+    a.download = `audit-report-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [findings, form7501Data, dutyResult, riskResult]);
-
-  const handleDrop = useCallback(
-    (
-      e: React.DragEvent,
-      setFile: (f: File | null) => void,
-      setData: (d: InvoiceData | Form7501Data) => void,
-      data: InvoiceData | Form7501Data,
-    ) => {
-      e.preventDefault();
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        setFile(file);
-        setData(data);
-      }
-    },
-    [],
-  );
-
-  const preventDefault = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-  }, []);
+  }, [findings, dutyResult, riskResult]);
 
   /* ================================================================ */
   /* RENDER                                                           */
@@ -507,22 +466,26 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                   : "border-dashed hover:border-primary/50"
               }`}
               onDragOver={preventDefault}
-              onDrop={(e) =>
-                handleDrop(
-                  e,
-                  setInvoiceFile as (f: File | null) => void,
-                  setInvoiceData as (d: InvoiceData | Form7501Data) => void,
-                  SAMPLE_INVOICE,
-                )
-              }
+              onDrop={(e) => handleDrop(e, "invoice")}
+              onClick={() => invoiceInputRef.current?.click()}
             >
               <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+                <input
+                  ref={invoiceInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleFileSelect(f, "invoice");
+                  }}
+                />
                 {invoiceFile ? (
                   <>
                     <FileText className="mb-2 h-10 w-10 text-green-600" />
                     <p className="font-medium">{invoiceFile.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Commercial Invoice loaded
+                      Commercial Invoice ready
                     </p>
                   </>
                 ) : (
@@ -545,22 +508,26 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                   : "border-dashed hover:border-primary/50"
               }`}
               onDragOver={preventDefault}
-              onDrop={(e) =>
-                handleDrop(
-                  e,
-                  setForm7501File as (f: File | null) => void,
-                  setForm7501Data as (d: InvoiceData | Form7501Data) => void,
-                  SAMPLE_7501,
-                )
-              }
+              onDrop={(e) => handleDrop(e, "form7501")}
+              onClick={() => form7501InputRef.current?.click()}
             >
               <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+                <input
+                  ref={form7501InputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleFileSelect(f, "form7501");
+                  }}
+                />
                 {form7501File ? (
                   <>
                     <FileText className="mb-2 h-10 w-10 text-green-600" />
                     <p className="font-medium">{form7501File.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      CBP Form 7501 loaded
+                      CBP Form 7501 ready
                     </p>
                   </>
                 ) : (
@@ -576,19 +543,33 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
             </Card>
           </div>
 
+          {extractError && (
+            <p className="text-sm text-red-600">{extractError}</p>
+          )}
+
           <div className="flex gap-3">
-            <Button onClick={loadSample} variant="outline">
-              Load Sample Files
-            </Button>
             <Button
               onClick={runAudit}
-              disabled={!invoiceData || !form7501Data}
+              disabled={!invoiceFile || !form7501File || extracting}
               className="gap-2"
             >
-              <Sparkles className="h-4 w-4" />
-              Run AI Audit
+              {extracting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Extracting PDF text...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Run AI Audit
+                </>
+              )}
             </Button>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Upload your actual Commercial Invoice and CBP Form 7501 PDFs. The AI agent will extract and analyze every field from both documents, then cross-check them for compliance.
+          </p>
         </div>
       )}
 
@@ -612,7 +593,7 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                 <div className="flex items-center gap-3 rounded-lg border border-dashed p-4">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                   <span className="text-sm text-muted-foreground">
-                    Claude is analyzing your documents...
+                    Claude is reading and analyzing your documents...
                   </span>
                 </div>
               )}
@@ -623,7 +604,6 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                 const Icon = config.icon;
                 const isDone = inv.state === "result";
 
-                // Findings rendered inline with severity colors
                 if (inv.toolName === "report_finding") {
                   const finding = inv.args as unknown as AuditFinding;
                   return (
@@ -660,14 +640,11 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                       {isDone ? config.label : config.activeLabel}
                     </span>
                     {inv.toolName === "lookup_hts_code" &&
-                      typeof inv.args.keyword === "string" ? (
-                        <Badge
-                          variant="secondary"
-                          className="ml-auto text-xs"
-                        >
-                          {inv.args.keyword}
-                        </Badge>
-                      ) : null}
+                    typeof inv.args.keyword === "string" ? (
+                      <Badge variant="secondary" className="ml-auto text-xs">
+                        {inv.args.keyword}
+                      </Badge>
+                    ) : null}
                   </div>
                 );
               })}
@@ -678,7 +655,9 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
           {assistantMessages.length > 0 &&
             assistantMessages.some((m) =>
               m.parts
-                .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                .filter(
+                  (p): p is { type: "text"; text: string } => p.type === "text",
+                )
                 .some((p) => p.text.trim()),
             ) && (
               <Card>
@@ -690,7 +669,10 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                     {assistantMessages
                       .flatMap((m) =>
                         m.parts
-                          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                          .filter(
+                            (p): p is { type: "text"; text: string } =>
+                              p.type === "text",
+                          )
                           .map((p) => p.text),
                       )
                       .join("")}
@@ -782,48 +764,6 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-lg border p-3 text-center">
-                    <p className="text-xs text-muted-foreground">
-                      AI Calculated
-                    </p>
-                    <p className="text-xl font-bold text-primary">
-                      ${dutyResult.totalDuties}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Effective rate: {dutyResult.effectiveDutyRate}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border p-3 text-center">
-                    <p className="text-xs text-muted-foreground">
-                      7501 Declared (Box 44)
-                    </p>
-                    <p className="text-xl font-bold">
-                      ${form7501Data?.totalFees?.toFixed(2) ?? "—"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Difference</p>
-                    <p
-                      className={`text-xl font-bold ${
-                        Math.abs(
-                          parseFloat(dutyResult.totalDuties) -
-                            (form7501Data?.totalFees ?? 0),
-                        ) < 1
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {Math.abs(
-                        parseFloat(dutyResult.totalDuties) -
-                          (form7501Data?.totalFees ?? 0),
-                      ) < 1
-                        ? "Correct"
-                        : `$${Math.abs(parseFloat(dutyResult.totalDuties) - (form7501Data?.totalFees ?? 0)).toFixed(2)}`}
-                    </p>
-                  </div>
-                </div>
-
                 <div className="mt-4 space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">
@@ -831,12 +771,20 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                     </span>
                     <span>${dutyResult.generalDuty.amount}</span>
                   </div>
-                  {dutyResult.section301.applicable && (
+                  {dutyResult.section301?.applicable && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">
                         Section 301 ({dutyResult.section301.rate})
                       </span>
                       <span>${dutyResult.section301.amount}</span>
+                    </div>
+                  )}
+                  {dutyResult.section232?.applicable && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Section 232 ({dutyResult.section232.rate})
+                      </span>
+                      <span>${dutyResult.section232.amount}</span>
                     </div>
                   )}
                   <div className="flex justify-between">
@@ -852,8 +800,12 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                     <span>${dutyResult.hmf.amount}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1 font-medium">
-                    <span>Total</span>
+                    <span>AI Calculated Total</span>
                     <span>${dutyResult.totalDuties}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Effective duty rate</span>
+                    <span>{dutyResult.effectiveDutyRate}</span>
                   </div>
                 </div>
               </CardContent>
@@ -947,7 +899,9 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
           {assistantMessages.length > 0 &&
             assistantMessages.some((m) =>
               m.parts
-                .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                .filter(
+                  (p): p is { type: "text"; text: string } => p.type === "text",
+                )
                 .some((p) => p.text.trim()),
             ) && (
               <Card>
@@ -959,7 +913,10 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
                     {assistantMessages
                       .flatMap((m) =>
                         m.parts
-                          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+                          .filter(
+                            (p): p is { type: "text"; text: string } =>
+                              p.type === "text",
+                          )
                           .map((p) => p.text),
                       )
                       .join("")}
@@ -972,7 +929,7 @@ Follow your complete audit workflow: validate the HTS code against the USITC dat
           <div className="flex gap-3">
             <Button onClick={exportCSV} className="gap-2">
               <Download className="h-4 w-4" />
-              Download Audit Excel (CSV)
+              Download Audit CSV
             </Button>
             <Button onClick={resetAudit} variant="outline" className="gap-2">
               <RotateCcw className="h-4 w-4" />

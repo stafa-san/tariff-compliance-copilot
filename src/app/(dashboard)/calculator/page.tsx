@@ -22,6 +22,10 @@ interface CostBreakdown {
   generalDutyRate: number;
   section301: number;
   section301Rate: number;
+  section232: number;
+  section232Rate: number;
+  section122: number;
+  section122Rate: number;
   mpf: number;
   hmf: number;
   totalDuties: number;
@@ -35,6 +39,8 @@ export default function CalculatorPage() {
   const [insurance, setInsurance] = useState("");
   const [dutyRate, setDutyRate] = useState("");
   const [section301Rate, setSection301Rate] = useState("");
+  const [section232Rate, setSection232Rate] = useState("");
+  const [section122Rate, setSection122Rate] = useState("");
   const [shippingMode, setShippingMode] = useState("air");
   const [result, setResult] = useState<CostBreakdown | null>(null);
   const [htsLookup, setHtsLookup] = useState<"idle" | "loading" | "found" | "not-found">("idle");
@@ -112,14 +118,18 @@ export default function CalculatorPage() {
     const insuranceCost = parseFloat(insurance) || 0;
     const generalRate = parseFloat(dutyRate) / 100 || 0;
     const s301Rate = parseFloat(section301Rate) / 100 || 0;
+    const s232Rate = parseFloat(section232Rate) / 100 || 0;
+    const s122Rate = parseFloat(section122Rate) / 100 || 0;
 
     const enteredValue = productCost + freightCost + insuranceCost;
     const generalDuty = productCost * generalRate;
     const section301 = productCost * s301Rate;
+    const section232 = productCost * s232Rate;
+    const section122 = productCost * s122Rate;
     const rawMpf = enteredValue * MPF_RATE;
     const mpf = Math.min(MPF_MAX, Math.max(MPF_MIN, rawMpf));
     const hmf = shippingMode === "ocean" ? enteredValue * HMF_RATE : 0;
-    const totalDuties = generalDuty + section301 + mpf + hmf;
+    const totalDuties = generalDuty + section301 + section232 + section122 + mpf + hmf;
     const totalLandedCost = enteredValue + totalDuties;
 
     setResult({
@@ -131,6 +141,10 @@ export default function CalculatorPage() {
       generalDutyRate: generalRate * 100,
       section301,
       section301Rate: s301Rate * 100,
+      section232,
+      section232Rate: s232Rate * 100,
+      section122,
+      section122Rate: s122Rate * 100,
       mpf,
       hmf,
       totalDuties,
@@ -145,6 +159,8 @@ export default function CalculatorPage() {
     setInsurance("0");
     setDutyRate("16.5");
     setSection301Rate("7.5");
+    setSection232Rate("0");
+    setSection122Rate("0");
     setShippingMode("air");
   };
 
@@ -269,9 +285,32 @@ export default function CalculatorPage() {
                   <Input
                     type="number"
                     step="0.01"
-                    placeholder="7.5"
+                    placeholder="7.5 (China imports)"
                     value={section301Rate}
                     onChange={(e) => setSection301Rate(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Section 232 Rate (%)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="25 (steel) / 10 (aluminum)"
+                    value={section232Rate}
+                    onChange={(e) => setSection232Rate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Section 122 Rate (%)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="0"
+                    value={section122Rate}
+                    onChange={(e) => setSection122Rate(e.target.value)}
                   />
                 </div>
               </div>
@@ -319,6 +358,20 @@ export default function CalculatorPage() {
                       <Row
                         label={`Section 301 (${formatPercent(result.section301Rate)})`}
                         value={formatCurrency(result.section301)}
+                        highlight
+                      />
+                    )}
+                    {result.section232 > 0 && (
+                      <Row
+                        label={`Section 232 (${formatPercent(result.section232Rate)})`}
+                        value={formatCurrency(result.section232)}
+                        highlight
+                      />
+                    )}
+                    {result.section122 > 0 && (
+                      <Row
+                        label={`Section 122 (${formatPercent(result.section122Rate)})`}
+                        value={formatCurrency(result.section122)}
                         highlight
                       />
                     )}
