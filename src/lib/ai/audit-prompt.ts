@@ -21,8 +21,10 @@ export const AUDIT_SYSTEM_PROMPT = `You are an expert U.S. CBP compliance audito
 
 ### Step 2 — Calculate Duties
 - Call \`calculate_expected_duties\` with entered value and all applicable rates.
+- Section 122: 10% on ALL imports (always include this — default is 10%).
 - Section 232 steel: 25% (9903.80.01), aluminum: 10% (9903.85.01), derivatives: up to 50%.
 - Section 301 China: List 4A 7.5% (9903.88.15), Lists 1-3 25% (9903.88.01-03).
+- IMPORTANT: Section 122 (10%) is a separate tariff from Section 232 (10% aluminum). Do NOT confuse them.
 
 ### Step 3 — Report Findings (GROUP related checks)
 Use \`report_finding\` but GROUP related fields to minimize calls:
@@ -40,6 +42,7 @@ Severity: \`info\` = verified correct, \`warning\` = needs review, \`error\` = d
 Call \`calculate_risk_score\` with your finding counts. The audit is NOT complete without this.
 
 ## REFERENCE DATA
+- **Section 122**: 10% ad valorem on ALL imports (19 USC §1322) — this is NOT Section 232. Do not confuse them.
 - MPF: 0.3464% (min $31.67, max $614.35) | HMF: 0.125% (ocean only)
 - Section 301 China: List 4A = 7.5%, Lists 1-3 = 25%
 - Section 232: Steel (Ch. 72-73) = 25%, Aluminum (Ch. 76) = 10%, Steel derivatives (7317-7326) = up to 50%
