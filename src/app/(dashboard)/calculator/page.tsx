@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { Calculator, DollarSign, Loader2, CheckCircle2 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,21 @@ import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { MPF_RATE, MPF_MIN, MPF_MAX, HMF_RATE } from "@/lib/utils/constants";
 import { searchHts } from "@/lib/services/hts-service";
 import { parseDutyRate } from "@/lib/services/hts-service";
+
+const COUNTRIES = [
+  { code: "CN", name: "China" },
+  { code: "VN", name: "Vietnam" },
+  { code: "MX", name: "Mexico" },
+  { code: "IN", name: "India" },
+  { code: "BD", name: "Bangladesh" },
+  { code: "DE", name: "Germany" },
+  { code: "JP", name: "Japan" },
+  { code: "KR", name: "South Korea" },
+  { code: "TW", name: "Taiwan" },
+  { code: "TH", name: "Thailand" },
+  { code: "CA", name: "Canada" },
+  { code: "OTHER", name: "Other" },
+];
 
 interface CostBreakdown {
   productCost: number;
@@ -30,6 +45,7 @@ interface CostBreakdown {
   hmf: number;
   totalDuties: number;
   totalLandedCost: number;
+  countryOfOrigin: string;
 }
 
 export default function CalculatorPage() {
@@ -38,9 +54,7 @@ export default function CalculatorPage() {
   const [freight, setFreight] = useState("");
   const [insurance, setInsurance] = useState("");
   const [dutyRate, setDutyRate] = useState("");
-  const [section301Rate, setSection301Rate] = useState("");
-  const [section232Rate, setSection232Rate] = useState("");
-  const [section122Rate, setSection122Rate] = useState("");
+  const [countryOfOrigin, setCountryOfOrigin] = useState("");
   const [shippingMode, setShippingMode] = useState("air");
   const [result, setResult] = useState<CostBreakdown | null>(null);
   const [htsLookup, setHtsLookup] = useState<"idle" | "loading" | "found" | "not-found">("idle");
@@ -48,7 +62,6 @@ export default function CalculatorPage() {
   const lookupTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lookupHtsRate = useCallback(async (code: string) => {
-    // Clean the code — strip dots/spaces to get just digits
     const clean = code.replace(/[\s.-]/g, "");
     if (clean.length < 4) {
       setHtsLookup("idle");
@@ -59,47 +72,35 @@ export default function CalculatorPage() {
     setHtsLookup("loading");
 
     try {
-      // For 10-digit codes like 6110.20.2079, the USITC API indexes by the
-      // 8-digit tariff line (6110.20.20), not the full 10-digit stat suffix.
-      // Search with the 8-digit prefix (first 4 digits as heading) for best results.
-      const heading = clean.slice(0, 4); // e.g. "6110"
+      const heading = clean.slice(0, 4);
       const searchTerm = code.replace(/[\s]/g, "");
       const results = await searchHts(searchTerm.length > 10 ? heading : searchTerm);
 
-      // Build rate inheritance: stat suffix entries often have no rate of their own,
-      // so we carry forward the last parent's general rate.
       let inheritedGeneral = "";
       const enriched = results.map((r) => {
         if (r.general) inheritedGeneral = r.general;
         return { ...r, effectiveGeneral: r.general || inheritedGeneral };
       });
 
-      // Try exact match on full code, then stat-suffix match, then 8-digit prefix, then prefix match
       const findMatch = () => {
-        // Exact match on full code (htsno + statisticalSuffix)
         const exact = enriched.find((r) => {
           const fullCode = (r.htsno + (r.statisticalSuffix || "")).replace(/[\s.-]/g, "");
           return fullCode === clean;
         });
         if (exact) return exact;
 
-        // For 10-digit inputs, find the stat suffix entry whose parent code matches
-        // and whose statisticalSuffix matches the last 2 digits
         if (clean.length >= 10) {
           const eightDigit = clean.slice(0, 8);
           const statSuffix = clean.slice(8, 10);
-          // Try matching parent 8-digit code + stat suffix
           const statMatch = enriched.find((r) => {
             const rc = r.htsno.replace(/[\s.-]/g, "");
             return rc === eightDigit && r.statisticalSuffix === statSuffix;
           });
           if (statMatch) return statMatch;
-          // Fall back to just the 8-digit tariff line
           const eightMatch = enriched.find((r) => r.htsno.replace(/[\s.-]/g, "") === eightDigit);
           if (eightMatch) return eightMatch;
         }
 
-        // Prefix match — find longest matching code
         return enriched
           .filter((r) => {
             const rc = r.htsno.replace(/[\s.-]/g, "");
@@ -111,7 +112,6 @@ export default function CalculatorPage() {
       const match = findMatch();
 
       if (match) {
-        // Use the effective (inherited) general rate for stat suffix entries
         const rateStr = match.effectiveGeneral || "";
         const rate = parseDutyRate(rateStr);
         if (rateStr) {
@@ -119,26 +119,7 @@ export default function CalculatorPage() {
         }
         setHtsDescription(match.description);
         setHtsLookup("found");
-
-        // Check footnotes for Section 301
-        const has301 = match.footnotes?.some(
-          (fn) => fn.value && /9903\.88/.test(fn.value)
-        );
-        if (has301 && !section301Rate) {
-          setSection301Rate("7.5");
-        }
-        // Check footnotes for Section 232
-        const has232 = match.footnotes?.some(
-          (fn) => fn.value && /9903\.8[015]/.test(fn.value)
-        );
-        if (has232 && !section232Rate) {
-          // Detect steel vs aluminum from chapter
-          const ch = clean.slice(0, 2);
-          if (ch === "76") setSection232Rate("10");
-          else if (ch === "72" || ch === "73") setSection232Rate("25");
-        }
       } else if (clean.length >= 8) {
-        // If full code search failed, retry with just the heading
         const headingResults = await searchHts(heading);
         let hInheritedGeneral = "";
         const hEnriched = headingResults.map((r) => {
@@ -172,13 +153,12 @@ export default function CalculatorPage() {
       setHtsLookup("not-found");
       setHtsDescription("");
     }
-  }, [section301Rate, section232Rate]);
+  }, []);
 
   const handleHtsChange = (value: string) => {
     setHtsCode(value);
     setHtsLookup("idle");
 
-    // Debounce the lookup
     if (lookupTimeout.current) clearTimeout(lookupTimeout.current);
     lookupTimeout.current = setTimeout(() => {
       lookupHtsRate(value);
@@ -188,10 +168,28 @@ export default function CalculatorPage() {
   const handleHtsPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pasted = e.clipboardData.getData("text").trim();
     if (pasted) {
-      // Let the onChange fire first, then trigger immediate lookup
       if (lookupTimeout.current) clearTimeout(lookupTimeout.current);
       setTimeout(() => lookupHtsRate(pasted), 100);
     }
+  };
+
+  // Auto-determine Section 301/232/122 rates from country + HTS code
+  const getApplicableRates = (country: string, hts: string) => {
+    const clean = hts.replace(/[\s.-]/g, "");
+    const chapter = clean.slice(0, 2);
+
+    // Section 122: 10% on ALL imports
+    const s122 = 10;
+
+    // Section 301: 25% on all Chinese imports
+    const s301 = country === "CN" ? 25 : 0;
+
+    // Section 232: steel (Ch 72-73) = 25%, aluminum (Ch 76) = 10%
+    let s232 = 0;
+    if (["72", "73"].includes(chapter)) s232 = 25;
+    else if (chapter === "76") s232 = 10;
+
+    return { s122, s301, s232 };
   };
 
   const calculate = (e: React.FormEvent) => {
@@ -200,15 +198,14 @@ export default function CalculatorPage() {
     const freightCost = parseFloat(freight) || 0;
     const insuranceCost = parseFloat(insurance) || 0;
     const generalRate = parseFloat(dutyRate) / 100 || 0;
-    const s301Rate = parseFloat(section301Rate) / 100 || 0;
-    const s232Rate = parseFloat(section232Rate) / 100 || 0;
-    const s122Rate = parseFloat(section122Rate) / 100 || 0;
+
+    const { s122, s301, s232 } = getApplicableRates(countryOfOrigin, htsCode);
 
     const enteredValue = productCost + freightCost + insuranceCost;
     const generalDuty = productCost * generalRate;
-    const section301 = productCost * s301Rate;
-    const section232 = productCost * s232Rate;
-    const section122 = productCost * s122Rate;
+    const section301 = productCost * (s301 / 100);
+    const section232 = productCost * (s232 / 100);
+    const section122 = productCost * (s122 / 100);
     const rawMpf = enteredValue * MPF_RATE;
     const mpf = Math.min(MPF_MAX, Math.max(MPF_MIN, rawMpf));
     const hmf = shippingMode === "ocean" ? enteredValue * HMF_RATE : 0;
@@ -223,15 +220,16 @@ export default function CalculatorPage() {
       generalDuty,
       generalDutyRate: generalRate * 100,
       section301,
-      section301Rate: s301Rate * 100,
+      section301Rate: s301,
       section232,
-      section232Rate: s232Rate * 100,
+      section232Rate: s232,
       section122,
-      section122Rate: s122Rate * 100,
+      section122Rate: s122,
       mpf,
       hmf,
       totalDuties,
       totalLandedCost,
+      countryOfOrigin,
     });
   };
 
@@ -241,9 +239,7 @@ export default function CalculatorPage() {
     setFreight("0");
     setInsurance("0");
     setDutyRate("16.5");
-    setSection301Rate("7.5");
-    setSection232Rate("0");
-    setSection122Rate("0");
+    setCountryOfOrigin("CN");
     setShippingMode("air");
   };
 
@@ -312,6 +308,24 @@ export default function CalculatorPage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label>Country of Origin</Label>
+                  <Select value={countryOfOrigin} onValueChange={setCountryOfOrigin}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select country" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COUNTRIES.map((c) => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <Label>Freight (USD)</Label>
                   <Input
                     type="number"
@@ -321,9 +335,6 @@ export default function CalculatorPage() {
                     onChange={(e) => setFreight(e.target.value)}
                   />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Insurance (USD)</Label>
                   <Input
@@ -334,6 +345,9 @@ export default function CalculatorPage() {
                     onChange={(e) => setInsurance(e.target.value)}
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Shipping Mode</Label>
                   <Select value={shippingMode} onValueChange={setShippingMode}>
@@ -347,11 +361,6 @@ export default function CalculatorPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-
-              <Separator />
-
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>General Duty Rate (%)</Label>
                   <Input
@@ -361,39 +370,6 @@ export default function CalculatorPage() {
                     value={dutyRate}
                     onChange={(e) => setDutyRate(e.target.value)}
                     required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Section 301 Rate (%)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="7.5 (China imports)"
-                    value={section301Rate}
-                    onChange={(e) => setSection301Rate(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Section 232 Rate (%)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="25 (steel) / 10 (aluminum)"
-                    value={section232Rate}
-                    onChange={(e) => setSection232Rate(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Section 122 Rate (%)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="0"
-                    value={section122Rate}
-                    onChange={(e) => setSection122Rate(e.target.value)}
                   />
                 </div>
               </div>
@@ -419,6 +395,11 @@ export default function CalculatorPage() {
                   <CardTitle className="flex items-center gap-2">
                     <DollarSign className="h-5 w-5" />
                     Cost Breakdown
+                    {result.countryOfOrigin && (
+                      <span className="ml-auto text-sm font-normal text-muted-foreground">
+                        Origin: {COUNTRIES.find((c) => c.code === result.countryOfOrigin)?.name || result.countryOfOrigin}
+                      </span>
+                    )}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -437,6 +418,11 @@ export default function CalculatorPage() {
                       label={`General Duty (${formatPercent(result.generalDutyRate)})`}
                       value={formatCurrency(result.generalDuty)}
                     />
+                    <Row
+                      label={`Section 122 (${formatPercent(result.section122Rate)})`}
+                      value={formatCurrency(result.section122)}
+                      highlight
+                    />
                     {result.section301 > 0 && (
                       <Row
                         label={`Section 301 (${formatPercent(result.section301Rate)})`}
@@ -448,13 +434,6 @@ export default function CalculatorPage() {
                       <Row
                         label={`Section 232 (${formatPercent(result.section232Rate)})`}
                         value={formatCurrency(result.section232)}
-                        highlight
-                      />
-                    )}
-                    {result.section122 > 0 && (
-                      <Row
-                        label={`Section 122 (${formatPercent(result.section122Rate)})`}
-                        value={formatCurrency(result.section122)}
                         highlight
                       />
                     )}

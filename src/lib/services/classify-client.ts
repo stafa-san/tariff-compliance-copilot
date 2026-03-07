@@ -12,7 +12,7 @@ import {
 
 // Section 301 tariff rates by country
 const SECTION_301_COUNTRIES: Record<string, { rate: number; list: string }> = {
-  CN: { rate: 7.5, list: "List 4A (9903.88.15)" },
+  CN: { rate: 25, list: "Lists 1-4 (9903.88.01-03)" },
 };
 
 const COUNTRY_NAMES: Record<string, string> = {

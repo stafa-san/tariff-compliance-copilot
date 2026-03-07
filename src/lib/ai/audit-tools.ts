@@ -134,29 +134,16 @@ export const checkTradeRemedies = tool({
       note: "10% ad valorem tariff on all imports under Section 122",
     });
 
-    // Section 301 tariffs (China-origin goods)
+    // Section 301 tariffs (China-origin goods) — 25% on all Chinese imports
     if (countryOfOrigin === "CN") {
-      // Chapters 61-62 (apparel/textiles) generally fall under List 4A
-      if (["61", "62", "63"].includes(chapter)) {
-        remedies.push({
-          type: "Section 301",
-          rate: 7.5,
-          list: "List 4A",
-          htsProvision: "9903.88.15",
-          authority: "USTR",
-          note: "Additional 7.5% ad valorem duty on List 4A Chinese imports",
-        });
-      } else {
-        // Most other Chinese imports are on Lists 1-3 at 25%
-        remedies.push({
-          type: "Section 301",
-          rate: 25,
-          list: "Lists 1-3",
-          htsProvision: "9903.88.01-03",
-          authority: "USTR",
-          note: "Additional 25% ad valorem duty on Chinese imports",
-        });
-      }
+      remedies.push({
+        type: "Section 301",
+        rate: 25,
+        list: "Lists 1-4",
+        htsProvision: "9903.88.01-03",
+        authority: "USTR",
+        note: "Additional 25% ad valorem duty on Chinese imports",
+      });
     }
 
     // Section 232 tariffs — comprehensive HTS code coverage
