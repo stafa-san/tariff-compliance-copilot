@@ -66,19 +66,41 @@ export default function CalculatorPage() {
       const searchTerm = code.replace(/[\s]/g, "");
       const results = await searchHts(searchTerm.length > 10 ? heading : searchTerm);
 
-      // Try exact match on full code, then 8-digit prefix, then 6-digit, then 4-digit
+      // Build rate inheritance: stat suffix entries often have no rate of their own,
+      // so we carry forward the last parent's general rate.
+      let inheritedGeneral = "";
+      const enriched = results.map((r) => {
+        if (r.general) inheritedGeneral = r.general;
+        return { ...r, effectiveGeneral: r.general || inheritedGeneral };
+      });
+
+      // Try exact match on full code, then stat-suffix match, then 8-digit prefix, then prefix match
       const findMatch = () => {
-        // Exact match on full code
-        const exact = results.find((r) => r.htsno.replace(/[\s.-]/g, "") === clean);
+        // Exact match on full code (htsno + statisticalSuffix)
+        const exact = enriched.find((r) => {
+          const fullCode = (r.htsno + (r.statisticalSuffix || "")).replace(/[\s.-]/g, "");
+          return fullCode === clean;
+        });
         if (exact) return exact;
-        // Match on 8-digit tariff line (strip 2-digit stat suffix)
+
+        // For 10-digit inputs, find the stat suffix entry whose parent code matches
+        // and whose statisticalSuffix matches the last 2 digits
         if (clean.length >= 10) {
           const eightDigit = clean.slice(0, 8);
-          const m = results.find((r) => r.htsno.replace(/[\s.-]/g, "") === eightDigit);
-          if (m) return m;
+          const statSuffix = clean.slice(8, 10);
+          // Try matching parent 8-digit code + stat suffix
+          const statMatch = enriched.find((r) => {
+            const rc = r.htsno.replace(/[\s.-]/g, "");
+            return rc === eightDigit && r.statisticalSuffix === statSuffix;
+          });
+          if (statMatch) return statMatch;
+          // Fall back to just the 8-digit tariff line
+          const eightMatch = enriched.find((r) => r.htsno.replace(/[\s.-]/g, "") === eightDigit);
+          if (eightMatch) return eightMatch;
         }
+
         // Prefix match — find longest matching code
-        return results
+        return enriched
           .filter((r) => {
             const rc = r.htsno.replace(/[\s.-]/g, "");
             return clean.startsWith(rc) || rc.startsWith(clean);
@@ -88,9 +110,13 @@ export default function CalculatorPage() {
 
       const match = findMatch();
 
-      if (match && match.general) {
-        const rate = parseDutyRate(match.general);
-        setDutyRate(rate > 0 ? rate.toString() : match.general === "Free" ? "0" : "");
+      if (match) {
+        // Use the effective (inherited) general rate for stat suffix entries
+        const rateStr = match.effectiveGeneral || "";
+        const rate = parseDutyRate(rateStr);
+        if (rateStr) {
+          setDutyRate(rate > 0 ? rate.toString() : rateStr === "Free" ? "0" : "");
+        }
         setHtsDescription(match.description);
         setHtsLookup("found");
 
@@ -114,16 +140,24 @@ export default function CalculatorPage() {
       } else if (clean.length >= 8) {
         // If full code search failed, retry with just the heading
         const headingResults = await searchHts(heading);
-        const headingMatch = headingResults
+        let hInheritedGeneral = "";
+        const hEnriched = headingResults.map((r) => {
+          if (r.general) hInheritedGeneral = r.general;
+          return { ...r, effectiveGeneral: r.general || hInheritedGeneral };
+        });
+        const headingMatch = hEnriched
           .filter((r) => {
             const rc = r.htsno.replace(/[\s.-]/g, "");
             return clean.startsWith(rc) || rc.startsWith(clean.slice(0, 8));
           })
           .sort((a, b) => b.htsno.length - a.htsno.length)[0];
 
-        if (headingMatch && headingMatch.general) {
-          const rate = parseDutyRate(headingMatch.general);
-          setDutyRate(rate > 0 ? rate.toString() : headingMatch.general === "Free" ? "0" : "");
+        if (headingMatch) {
+          const rateStr = headingMatch.effectiveGeneral || "";
+          const rate = parseDutyRate(rateStr);
+          if (rateStr) {
+            setDutyRate(rate > 0 ? rate.toString() : rateStr === "Free" ? "0" : "");
+          }
           setHtsDescription(headingMatch.description);
           setHtsLookup("found");
         } else {

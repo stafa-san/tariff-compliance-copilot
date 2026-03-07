@@ -48,16 +48,22 @@ export const lookupHtsCode = tool({
       const raw: Record<string, unknown>[] = await response.json();
 
       // Build rate inheritance (child entries inherit parent rates)
+      // Stat suffix entries (10-digit codes) often have no rate of their own
       let lastGeneral = "";
-      const results = raw.slice(0, 15).map((r: Record<string, unknown>) => {
+      let lastSpecial = "";
+      let lastOther = "";
+      const results = raw.slice(0, 20).map((r: Record<string, unknown>) => {
         const general = r.general as string;
-        if (general) lastGeneral = general;
+        const special = r.special as string;
+        const other = r.other as string;
+        if (general) { lastGeneral = general; lastSpecial = special || ""; lastOther = other || ""; }
         return {
           htsCode: r.htsno as string,
+          statisticalSuffix: (r.statisticalSuffix as string) || "",
           description: r.description as string,
           generalRate: general || lastGeneral || "See parent heading",
-          specialRate: (r.special as string) || "",
-          otherRate: (r.other as string) || "",
+          specialRate: special || lastSpecial || "",
+          otherRate: other || lastOther || "",
           indent: r.indent as string,
           units: r.units || [],
         };
@@ -326,8 +332,11 @@ export const calculateExpectedDuties = tool({
 export const reportFinding = tool({
   description:
     "Record an audit finding. Call this tool for EACH compliance check you " +
-    "perform. Severity: 'info' = verified correct, 'warning' = potential " +
-    "issue needing review, 'error' = definite discrepancy requiring action.",
+    "perform. You MUST report a finding for every field you check. " +
+    "Severity: 'info' = VERIFIED CORRECT (field matches between documents), " +
+    "'warning' = NEEDS REVIEW (potential issue or missing data), " +
+    "'error' = DISCREPANCY FOUND (definite mismatch requiring action). " +
+    "Always include the actual values from both documents when available.",
   inputSchema: z.object({
     field: z
       .string()
