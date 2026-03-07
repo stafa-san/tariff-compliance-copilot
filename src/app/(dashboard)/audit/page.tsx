@@ -1049,13 +1049,18 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
             </Card>
           )}
 
-          {/* Audit findings */}
+          {/* Audit findings — expanded per-field view */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Audit Findings</CardTitle>
               <p className="text-xs text-muted-foreground">
-                AI-generated cross-checks between Commercial Invoice and Form
-                7501
+                {(() => {
+                  const totalFields = findings.reduce((count, f) => {
+                    const bullets = f.description.split(/\n/).filter(l => l.trim().startsWith("•"));
+                    return count + (bullets.length || 1);
+                  }, 0);
+                  return `${totalFields} field checks across ${findings.length} categories — Commercial Invoice vs Form 7501`;
+                })()}
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1078,6 +1083,11 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                       ? "bg-yellow-100 text-yellow-700 border-yellow-300"
                       : "bg-red-100 text-red-700 border-red-300";
 
+                // Parse bullet-formatted field checks from description
+                const lines = finding.description.split(/\n/);
+                const bulletLines = lines.filter(l => l.trim().startsWith("•"));
+                const nonBulletText = lines.filter(l => !l.trim().startsWith("•") && l.trim()).join(" ");
+
                 return (
                   <div
                     key={i}
@@ -1096,33 +1106,79 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                             {finding.severity === "error" && <AlertCircle className="mr-1 h-3 w-3" />}
                             {statusLabel}
                           </span>
+                          {bulletLines.length > 0 && (
+                            <span className="text-xs text-muted-foreground ml-auto">
+                              {bulletLines.length} checks
+                            </span>
+                          )}
                         </div>
                         <p className="mt-1 text-sm font-medium">
                           {finding.title}
                         </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {finding.description}
-                        </p>
+
+                        {/* Per-field check rows */}
+                        {bulletLines.length > 0 ? (
+                          <div className="mt-2 space-y-1.5">
+                            {bulletLines.map((line, j) => {
+                              const text = line.replace(/^[•\s]+/, "").trim();
+                              // Detect status from emoji or keywords
+                              const isPass = /✅|matches?|correct|verified|present|consistent/i.test(text);
+                              const isFail = /❌|mismatch|discrepancy|missing|incorrect|differ/i.test(text);
+                              const isWarn = /⚠️|warning|review|potential|unclear|unable/i.test(text);
+
+                              // Extract field name (text before first colon)
+                              const colonIdx = text.indexOf(":");
+                              const fieldName = colonIdx > 0 ? text.slice(0, colonIdx).replace(/[✅❌⚠️]/g, "").trim() : "";
+                              const detail = colonIdx > 0 ? text.slice(colonIdx + 1).replace(/[✅❌⚠️]/g, "").trim() : text.replace(/[✅❌⚠️]/g, "").trim();
+
+                              const rowColor = isFail
+                                ? "text-red-700"
+                                : isWarn
+                                  ? "text-yellow-700"
+                                  : "text-green-700";
+                              const rowIcon = isFail
+                                ? <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                                : isWarn
+                                  ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-yellow-500" />
+                                  : <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />;
+
+                              return (
+                                <div key={j} className={`flex items-start gap-2 rounded px-2 py-1 text-xs ${
+                                  isFail ? "bg-red-100/50" : isWarn ? "bg-yellow-100/50" : isPass ? "bg-green-100/50" : ""
+                                }`}>
+                                  {rowIcon}
+                                  <span className={rowColor}>
+                                    {fieldName && <span className="font-semibold">{fieldName}: </span>}
+                                    {detail}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {finding.description}
+                          </p>
+                        )}
+
+                        {nonBulletText && bulletLines.length > 0 && (
+                          <p className="mt-1.5 text-xs text-muted-foreground">
+                            {nonBulletText}
+                          </p>
+                        )}
+
                         {(finding.invoiceValue || finding.form7501Value) && (
                           <div className="mt-2 flex gap-4 text-xs">
                             {finding.invoiceValue && (
                               <span>
-                                <span className="text-muted-foreground">
-                                  Invoice:{" "}
-                                </span>
-                                <span className="font-medium">
-                                  {finding.invoiceValue}
-                                </span>
+                                <span className="text-muted-foreground">Invoice: </span>
+                                <span className="font-medium">{finding.invoiceValue}</span>
                               </span>
                             )}
                             {finding.form7501Value && (
                               <span>
-                                <span className="text-muted-foreground">
-                                  7501:{" "}
-                                </span>
-                                <span className="font-medium">
-                                  {finding.form7501Value}
-                                </span>
+                                <span className="text-muted-foreground">7501: </span>
+                                <span className="font-medium">{finding.form7501Value}</span>
                               </span>
                             )}
                           </div>
