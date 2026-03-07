@@ -412,16 +412,15 @@ export default function AuditPage() {
       }
 
       // Extract broker name — look for Broker/Filer field (NOT Importing Carrier)
-      // In 7501 forms, the broker name appears in its own labeled field
       const brokerPatterns = [
-        /(?:Broker\/Filer|Customs Broker|Filer Name|Licensed Broker)[:\s]*\n?\s*([A-Z][^\n]{2,50})/i,
-        /(?:Broker\/Filer|Filer)[^\n]*?:\s*([A-Z][^\n]{2,50})/i,
-        /Broker[^\n]*\n\s*([A-Z][^\n]{2,50})/i,
+        /(?:Broker\/Filer|Customs Broker|Filer Name|Licensed Broker)[:\s]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
+        /(?:Broker\/Filer|Filer)[^\n]*?:\s*([A-Z][A-Za-z &.,'-]{2,50})/,
+        /Broker[^\n]*\n\s*([A-Z][A-Za-z &.,'-]{2,50})/,
       ];
-      let brokerName = "Unknown Broker";
+      let brokerName = "";
       for (const pattern of brokerPatterns) {
         const match = form7501Text.match(pattern);
-        if (match?.[1]?.trim()) {
+        if (match?.[1]?.trim() && match[1].trim().length >= 3) {
           brokerName = match[1].trim();
           break;
         }
@@ -486,46 +485,68 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
       "Country of Origin",
       "Entered Value",
       "General Duty Rate",
-      "Section 301 Rate",
-      "Section 232 Rate",
       "Total Duties (Calculated)",
       "Total Duties (7501)",
       "Discrepancy",
       "Risk Level",
       "Risk Score",
-      "Findings Summary",
+      "Notes",
       "Recommendation",
     ];
 
     // Extract key data from findings and tool results
     const errors = findings.filter((f) => f.severity === "error");
+    const warnings = findings.filter((f) => f.severity === "warning");
+    const infos = findings.filter((f) => f.severity === "info");
     const discrepancy =
       errors.length > 0 ? errors.map((e) => e.title).join("; ") : "None";
 
     // Try to parse entry number and other fields from 7501 text
     const text7501 = form7501TextRef.current;
     const entryMatch = text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z0-9-]+)/i);
-    const originMatch = text7501.match(/Country of Origin\s*\n?\s*([A-Z]{2})/i);
+    const originMatch = text7501.match(/(?:Country of Origin|origin)[:\s]*\n?\s*([A-Z]{2})/i);
+
+    // Extract broker name from AI findings first, then fallback to regex
+    let brokerName = brokerNameRef.current || "";
+    const brokerFinding = findings.find(
+      (f) => /parties|broker|logistics/i.test(f.field) || /broker/i.test(f.title),
+    );
+    if (brokerFinding) {
+      const brokerMatch = brokerFinding.description.match(
+        /(?:broker|filer)[:\s]*["']?([A-Za-z][A-Za-z &.,'-]{2,40})/i,
+      );
+      if (brokerMatch?.[1]) brokerName = brokerMatch[1].trim();
+    }
+    // Validate broker name — if it contains too many non-alpha chars, it's garbage
+    if (!brokerName || /[^A-Za-z\s&.,'-]/.test(brokerName) && brokerName.replace(/[^A-Za-z]/g, "").length < 3) {
+      brokerName = "See audit report";
+    }
+
+    // Build completeness notes
+    const totalChecks = findings.length;
+    const notes = `${totalChecks} checks completed: ${infos.length} verified, ${warnings.length} warnings, ${errors.length} errors`;
+
+    // Extract HTS codes from findings — check multiple possible field names
+    const htsCodes = findings
+      .filter((f) => /hts|classification|tariff/i.test(f.field))
+      .map((f) => f.form7501Value || "")
+      .filter(Boolean)
+      .join("; ");
 
     const row = [
-      brokerNameRef.current || "Unknown Broker",
+      brokerName,
       entryMatch?.[1] || "",
       "01",
-      findings
-        .filter((f) => f.field === "HTS Code")
-        .map((f) => f.form7501Value || "")
-        .join("; ") || "",
+      htsCodes,
       originMatch?.[1] || "",
       dutyResult?.enteredValue ? `$${dutyResult.enteredValue}` : "",
       dutyResult?.generalDuty?.rate || "",
-      dutyResult?.section301?.applicable ? dutyResult.section301.rate : "N/A",
-      dutyResult?.section232?.applicable ? dutyResult.section232.rate : "N/A",
       dutyResult ? `$${dutyResult.totalDuties}` : "",
       "", // 7501 declared total extracted from findings
       discrepancy,
       riskResult?.level || "N/A",
       riskResult?.riskScore?.toString() || "",
-      findings.map((f) => `[${f.severity}] ${f.title}`).join("; "),
+      notes,
       riskResult?.recommendation || "",
     ];
 
