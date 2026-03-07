@@ -25,6 +25,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                              */
@@ -261,38 +269,73 @@ export default function AuditPage() {
     }
   }, [step, toolInvocations.length]);
 
-  const [fileWarning, setFileWarning] = useState("");
   const [crossDocWarning, setCrossDocWarning] = useState("");
+  const [validatingFile, setValidatingFile] = useState<"invoice" | "form7501" | null>(null);
+
+  // File mismatch dialog state
+  const [mismatchDialog, setMismatchDialog] = useState<{
+    open: boolean;
+    message: string;
+    file: File | null;
+    slot: "invoice" | "form7501";
+  }>({ open: false, message: "", file: null, slot: "invoice" });
+
+  const commitFile = useCallback(
+    (file: File, type: "invoice" | "form7501") => {
+      if (type === "invoice") setInvoiceFile(file);
+      else setForm7501File(file);
+      setExtractError("");
+      setCrossDocWarning("");
+    },
+    [],
+  );
 
   /* ---- File handlers ---- */
   const handleFileSelect = useCallback(
-    (file: File, type: "invoice" | "form7501") => {
+    async (file: File, type: "invoice" | "form7501") => {
       // Basic validation: must be PDF
       if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
         setExtractError("Please upload a PDF file.");
         return;
       }
-      // Heuristic: warn if the filename suggests it's the wrong document type
-      const name = file.name.toLowerCase();
-      if (type === "invoice") {
-        if (name.includes("7501") || name.includes("entry summary") || name.includes("cbp")) {
-          setFileWarning("This file looks like a Form 7501. Did you mean to upload it to the CBP Form 7501 slot?");
-        } else {
-          setFileWarning("");
+
+      setValidatingFile(type);
+
+      // Extract text from the PDF to check its actual content
+      try {
+        const text = await extractPdfText(file);
+        const looks7501 = /entry summary|cbp form 7501|department of homeland|customs entry/i.test(text);
+        const looksInvoice = /commercial invoice|proforma invoice|bill to|sold to|invoice number|invoice date/i.test(text) &&
+          !looks7501;
+
+        if (type === "invoice" && looks7501) {
+          setValidatingFile(null);
+          setMismatchDialog({
+            open: true,
+            message: "This PDF appears to be a CBP Form 7501 (Entry Summary), but you're uploading it to the Commercial Invoice slot. Are you sure this is correct?",
+            file,
+            slot: type,
+          });
+          return;
         }
-        setInvoiceFile(file);
-      } else {
-        if (name.includes("invoice") || name.includes("commercial") || name.includes("proforma")) {
-          setFileWarning("This file looks like a Commercial Invoice. Did you mean to upload it to the Invoice slot?");
-        } else {
-          setFileWarning("");
+        if (type === "form7501" && looksInvoice) {
+          setValidatingFile(null);
+          setMismatchDialog({
+            open: true,
+            message: "This PDF appears to be a Commercial Invoice, but you're uploading it to the CBP Form 7501 slot. Are you sure this is correct?",
+            file,
+            slot: type,
+          });
+          return;
         }
-        setForm7501File(file);
+      } catch {
+        // If extraction fails here, just accept the file — it will fail again at audit time with a proper error
       }
-      setExtractError("");
-      setCrossDocWarning("");
+
+      setValidatingFile(null);
+      commitFile(file, type);
     },
-    [],
+    [commitFile],
   );
 
   const handleDrop = useCallback(
@@ -591,7 +634,12 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                     if (f) handleFileSelect(f, "invoice");
                   }}
                 />
-                {invoiceFile ? (
+                {validatingFile === "invoice" ? (
+                  <>
+                    <Loader2 className="mb-2 h-10 w-10 animate-spin text-primary" />
+                    <p className="font-medium">Checking document...</p>
+                  </>
+                ) : invoiceFile ? (
                   <>
                     <FileText className="mb-2 h-10 w-10 text-green-600" />
                     <p className="font-medium">{invoiceFile.name}</p>
@@ -633,7 +681,12 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                     if (f) handleFileSelect(f, "form7501");
                   }}
                 />
-                {form7501File ? (
+                {validatingFile === "form7501" ? (
+                  <>
+                    <Loader2 className="mb-2 h-10 w-10 animate-spin text-primary" />
+                    <p className="font-medium">Checking document...</p>
+                  </>
+                ) : form7501File ? (
                   <>
                     <FileText className="mb-2 h-10 w-10 text-green-600" />
                     <p className="font-medium">{form7501File.name}</p>
@@ -656,13 +709,6 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
 
           {extractError && (
             <p className="text-sm text-red-600">{extractError}</p>
-          )}
-
-          {fileWarning && !extractError && (
-            <div className="flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-yellow-600" />
-              <p className="text-sm text-yellow-800">{fileWarning}</p>
-            </div>
           )}
 
           {crossDocWarning && (
@@ -1108,6 +1154,43 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
           </div>
         </div>
       )}
+      {/* File mismatch confirmation dialog */}
+      <Dialog
+        open={mismatchDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setMismatchDialog((prev) => ({ ...prev, open: false }));
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              Document Type Mismatch
+            </DialogTitle>
+            <DialogDescription>{mismatchDialog.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setMismatchDialog((prev) => ({ ...prev, open: false }))
+              }
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (mismatchDialog.file) {
+                  commitFile(mismatchDialog.file, mismatchDialog.slot);
+                }
+                setMismatchDialog((prev) => ({ ...prev, open: false }));
+              }}
+            >
+              Upload Anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
