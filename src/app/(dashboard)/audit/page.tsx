@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   ScanSearch,
   Upload,
@@ -133,6 +133,7 @@ export default function AuditPage() {
 
   const invoiceInputRef = useRef<HTMLInputElement>(null);
   const form7501InputRef = useRef<HTMLInputElement>(null);
+  const toolListEndRef = useRef<HTMLDivElement>(null);
 
   /* ---- Claude AI chat (agentic tool-calling) ---- */
   const { messages, sendMessage, status, error } = useChat({
@@ -197,18 +198,42 @@ export default function AuditPage() {
     const inv = toolInvocations.find(
       (t) => t.toolName === "calculate_risk_score" && t.state === "result",
     );
-    return inv?.result as
-      | {
-          riskScore: number;
-          level: string;
-          totalChecks: number;
-          errorCount: number;
-          warningCount: number;
-          infoCount: number;
-          recommendation: string;
-        }
-      | undefined;
-  }, [toolInvocations]);
+    if (inv?.result) {
+      return inv.result as {
+        riskScore: number;
+        level: string;
+        totalChecks: number;
+        errorCount: number;
+        warningCount: number;
+        infoCount: number;
+        recommendation: string;
+      };
+    }
+    // Fallback: compute risk from findings if the tool wasn't called
+    if (findings.length > 0 && !isLoading) {
+      const errorCount = findings.filter((f) => f.severity === "error").length;
+      const warningCount = findings.filter((f) => f.severity === "warning").length;
+      const infoCount = findings.filter((f) => f.severity === "info").length;
+      const rawScore = errorCount * 25 + warningCount * 10;
+      const riskScore = Math.min(100, rawScore);
+      const level = riskScore >= 60 ? "High" : riskScore >= 30 ? "Medium" : "Low";
+      return {
+        riskScore,
+        level,
+        totalChecks: errorCount + warningCount + infoCount,
+        errorCount,
+        warningCount,
+        infoCount,
+        recommendation:
+          level === "High"
+            ? "Immediate review required — significant compliance discrepancies found."
+            : level === "Medium"
+              ? "Review recommended — some potential issues identified."
+              : "Low risk — documents appear compliant with minor notes.",
+      };
+    }
+    return undefined;
+  }, [toolInvocations, findings, isLoading]);
 
   const dutyResult = useMemo(() => {
     const inv = toolInvocations.find(
@@ -229,12 +254,43 @@ export default function AuditPage() {
       | undefined;
   }, [toolInvocations]);
 
+  /* ---- Auto-scroll to latest tool action during analysis ---- */
+  useEffect(() => {
+    if (step === 2 && toolListEndRef.current) {
+      toolListEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [step, toolInvocations.length]);
+
+  const [fileWarning, setFileWarning] = useState("");
+  const [crossDocWarning, setCrossDocWarning] = useState("");
+
   /* ---- File handlers ---- */
   const handleFileSelect = useCallback(
     (file: File, type: "invoice" | "form7501") => {
-      if (type === "invoice") setInvoiceFile(file);
-      else setForm7501File(file);
+      // Basic validation: must be PDF
+      if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+        setExtractError("Please upload a PDF file.");
+        return;
+      }
+      // Heuristic: warn if the filename suggests it's the wrong document type
+      const name = file.name.toLowerCase();
+      if (type === "invoice") {
+        if (name.includes("7501") || name.includes("entry summary") || name.includes("cbp")) {
+          setFileWarning("This file looks like a Form 7501. Did you mean to upload it to the CBP Form 7501 slot?");
+        } else {
+          setFileWarning("");
+        }
+        setInvoiceFile(file);
+      } else {
+        if (name.includes("invoice") || name.includes("commercial") || name.includes("proforma")) {
+          setFileWarning("This file looks like a Commercial Invoice. Did you mean to upload it to the Invoice slot?");
+        } else {
+          setFileWarning("");
+        }
+        setForm7501File(file);
+      }
       setExtractError("");
+      setCrossDocWarning("");
     },
     [],
   );
@@ -257,6 +313,7 @@ export default function AuditPage() {
     if (!invoiceFile || !form7501File) return;
     setExtracting(true);
     setExtractError("");
+    setCrossDocWarning("");
 
     try {
       // Extract text from both PDFs in parallel
@@ -268,11 +325,65 @@ export default function AuditPage() {
       invoiceTextRef.current = invoiceText;
       form7501TextRef.current = form7501Text;
 
-      // Try to extract broker name from 7501 text
-      const brokerMatch = form7501Text.match(
-        /(?:Broker\/Filer|Broker)[^\n]*\n\s*([^\n]+)/i,
-      );
-      brokerNameRef.current = brokerMatch?.[1]?.trim() || "Unknown Broker";
+      // Validate document types from content
+      const invoiceLower = invoiceText.toLowerCase();
+      const form7501Lower = form7501Text.toLowerCase();
+
+      // Check if invoice slot actually contains a 7501
+      const invoiceLooks7501 = /entry summary|cbp form 7501|department of homeland|entry number/i.test(invoiceText);
+      const form7501LooksInvoice = /commercial invoice|proforma|bill to|ship to|invoice number/i.test(form7501Text) &&
+        !/entry summary|cbp form 7501|department of homeland/i.test(form7501Text);
+
+      if (invoiceLooks7501 && form7501LooksInvoice) {
+        setExtractError("It looks like the files are swapped — the Invoice slot contains a Form 7501 and vice versa. Please swap them.");
+        setExtracting(false);
+        return;
+      }
+      if (invoiceLooks7501) {
+        setExtractError("The file uploaded as Commercial Invoice appears to be a CBP Form 7501. Please upload the correct file.");
+        setExtracting(false);
+        return;
+      }
+      if (form7501LooksInvoice) {
+        setExtractError("The file uploaded as CBP Form 7501 appears to be a Commercial Invoice. Please upload the correct file.");
+        setExtracting(false);
+        return;
+      }
+
+      // Cross-check: try to match key identifiers between documents
+      // Look for common fields like invoice number, supplier name, or values
+      const invoiceValueMatch = invoiceLower.match(/total[:\s]*\$?([\d,]+\.?\d*)/);
+      const form7501ValueMatch = form7501Lower.match(/entered value[:\s]*\$?([\d,]+\.?\d*)/);
+      const invoiceSupplier = invoiceLower.match(/(?:seller|shipper|exporter|from)[:\s]*([^\n]{5,40})/);
+      const form7501Manufacturer = form7501Lower.match(/(?:manufacturer|mid|supplier)[:\s]*([^\n]{5,40})/);
+
+      // If we can extract values from both and they're wildly different, warn
+      if (invoiceValueMatch && form7501ValueMatch) {
+        const invVal = parseFloat(invoiceValueMatch[1].replace(/,/g, ""));
+        const f7501Val = parseFloat(form7501ValueMatch[1].replace(/,/g, ""));
+        if (invVal > 0 && f7501Val > 0 && (invVal / f7501Val > 5 || f7501Val / invVal > 5)) {
+          setCrossDocWarning(
+            `The invoice total ($${invVal.toLocaleString()}) and 7501 entered value ($${f7501Val.toLocaleString()}) differ significantly. Are you sure these documents belong to the same shipment?`
+          );
+        }
+      }
+
+      // Extract broker name — look for Broker/Filer field (NOT Importing Carrier)
+      // In 7501 forms, the broker name appears in its own labeled field
+      const brokerPatterns = [
+        /(?:Broker\/Filer|Customs Broker|Filer Name|Licensed Broker)[:\s]*\n?\s*([A-Z][^\n]{2,50})/i,
+        /(?:Broker\/Filer|Filer)[^\n]*?:\s*([A-Z][^\n]{2,50})/i,
+        /Broker[^\n]*\n\s*([A-Z][^\n]{2,50})/i,
+      ];
+      let brokerName = "Unknown Broker";
+      for (const pattern of brokerPatterns) {
+        const match = form7501Text.match(pattern);
+        if (match?.[1]?.trim()) {
+          brokerName = match[1].trim();
+          break;
+        }
+      }
+      brokerNameRef.current = brokerName;
 
       setStep(2);
 
@@ -547,6 +658,20 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
             <p className="text-sm text-red-600">{extractError}</p>
           )}
 
+          {fileWarning && !extractError && (
+            <div className="flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-yellow-600" />
+              <p className="text-sm text-yellow-800">{fileWarning}</p>
+            </div>
+          )}
+
+          {crossDocWarning && (
+            <div className="flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-yellow-600" />
+              <p className="text-sm text-yellow-800">{crossDocWarning}</p>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <Button
               onClick={runAudit}
@@ -579,12 +704,23 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
       {step === 2 && (
         <div className="space-y-4">
           <Card>
-            <CardHeader className="pb-3">
+            <CardHeader className="sticky top-0 z-10 bg-background/95 pb-3 backdrop-blur supports-backdrop-filter:bg-background/80">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Sparkles className="h-5 w-5 animate-pulse text-primary" />
                 Agent Actions
                 {isLoading && (
-                  <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />
+                  <span className="ml-auto flex items-center gap-2">
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {toolInvocations.filter(t => t.state === "result").length} steps
+                    </span>
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  </span>
+                )}
+                {!isLoading && toolInvocations.length > 0 && (
+                  <span className="ml-auto flex items-center gap-1.5 text-xs font-normal text-green-600">
+                    <Check className="h-4 w-4" />
+                    Complete
+                  </span>
                 )}
               </CardTitle>
             </CardHeader>
@@ -648,8 +784,33 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                   </div>
                 );
               })}
+              {/* Scroll anchor */}
+              <div ref={toolListEndRef} />
             </CardContent>
           </Card>
+
+          {/* Sticky bottom progress indicator during analysis */}
+          {isLoading && (
+            <div className="sticky bottom-4 z-10">
+              <div className="mx-auto flex items-center justify-center gap-3 rounded-full border bg-background/95 px-5 py-2.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-background/80">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm font-medium">
+                  Analyzing{toolInvocations.length > 0 ? ` — ${toolInvocations.filter(t => t.state === "result").length} steps completed` : "..."}
+                </span>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+              </div>
+            </div>
+          )}
+
+          {/* Completion indicator when analysis is done */}
+          {!isLoading && step === 2 && toolInvocations.length > 0 && (
+            <div className="flex items-center justify-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3">
+              <Check className="h-5 w-5 text-green-600" />
+              <span className="text-sm font-medium text-green-700">
+                Analysis complete — {toolInvocations.filter(t => t.state === "result").length} steps performed
+              </span>
+            </div>
+          )}
 
           {/* Claude's streaming narrative */}
           {assistantMessages.length > 0 &&
@@ -827,71 +988,80 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                   No structured findings recorded.
                 </p>
               )}
-              {findings.map((finding, i) => (
-                <div
-                  key={i}
-                  className={`rounded-lg border p-4 ${severityBg(finding.severity)}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <SeverityIcon severity={finding.severity} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">
-                          {finding.field}
-                        </span>
-                        <Badge
-                          variant={
-                            finding.severity === "error"
-                              ? "destructive"
-                              : finding.severity === "warning"
-                                ? "outline"
-                                : "secondary"
-                          }
-                          className="text-xs"
-                        >
-                          {finding.severity}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-sm font-medium">
-                        {finding.title}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {finding.description}
-                      </p>
-                      {(finding.invoiceValue || finding.form7501Value) && (
-                        <div className="mt-2 flex gap-4 text-xs">
-                          {finding.invoiceValue && (
-                            <span>
-                              <span className="text-muted-foreground">
-                                Invoice:{" "}
-                              </span>
-                              <span className="font-medium">
-                                {finding.invoiceValue}
-                              </span>
-                            </span>
-                          )}
-                          {finding.form7501Value && (
-                            <span>
-                              <span className="text-muted-foreground">
-                                7501:{" "}
-                              </span>
-                              <span className="font-medium">
-                                {finding.form7501Value}
-                              </span>
-                            </span>
-                          )}
+              {findings.map((finding, i) => {
+                const statusLabel =
+                  finding.severity === "info"
+                    ? "Verified Correct"
+                    : finding.severity === "warning"
+                      ? "Needs Review"
+                      : "Discrepancy Found";
+                const statusColor =
+                  finding.severity === "info"
+                    ? "bg-green-100 text-green-700 border-green-300"
+                    : finding.severity === "warning"
+                      ? "bg-yellow-100 text-yellow-700 border-yellow-300"
+                      : "bg-red-100 text-red-700 border-red-300";
+
+                return (
+                  <div
+                    key={i}
+                    className={`rounded-lg border p-4 ${severityBg(finding.severity)}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <SeverityIcon severity={finding.severity} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">
+                            {finding.field}
+                          </span>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusColor}`}>
+                            {finding.severity === "info" && <Check className="mr-1 h-3 w-3" />}
+                            {finding.severity === "warning" && <AlertTriangle className="mr-1 h-3 w-3" />}
+                            {finding.severity === "error" && <AlertCircle className="mr-1 h-3 w-3" />}
+                            {statusLabel}
+                          </span>
                         </div>
-                      )}
-                      {finding.recommendation && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          <CircleDot className="mr-1 inline h-3 w-3" />
-                          {finding.recommendation}
+                        <p className="mt-1 text-sm font-medium">
+                          {finding.title}
                         </p>
-                      )}
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {finding.description}
+                        </p>
+                        {(finding.invoiceValue || finding.form7501Value) && (
+                          <div className="mt-2 flex gap-4 text-xs">
+                            {finding.invoiceValue && (
+                              <span>
+                                <span className="text-muted-foreground">
+                                  Invoice:{" "}
+                                </span>
+                                <span className="font-medium">
+                                  {finding.invoiceValue}
+                                </span>
+                              </span>
+                            )}
+                            {finding.form7501Value && (
+                              <span>
+                                <span className="text-muted-foreground">
+                                  7501:{" "}
+                                </span>
+                                <span className="font-medium">
+                                  {finding.form7501Value}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {finding.recommendation && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            <CircleDot className="mr-1 inline h-3 w-3" />
+                            {finding.recommendation}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
 
