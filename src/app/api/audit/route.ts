@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     system: AUDIT_SYSTEM_PROMPT,
     messages: await convertToModelMessages(uiMessages),
     tools: auditTools,
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(12),
   });
 
   return result.toUIMessageStreamResponse();
