@@ -125,6 +125,15 @@ export const checkTradeRemedies = tool({
 
     const chapter = htsCode.slice(0, 2);
 
+    // Section 122 — 10% tariff on ALL imports regardless of country or product
+    remedies.push({
+      type: "Section 122",
+      rate: 10,
+      htsProvision: "19 USC §1322",
+      authority: "CBP",
+      note: "10% ad valorem tariff on all imports under Section 122",
+    });
+
     // Section 301 tariffs (China-origin goods)
     if (countryOfOrigin === "CN") {
       // Chapters 61-62 (apparel/textiles) generally fall under List 4A
@@ -243,7 +252,7 @@ export const checkTradeRemedies = tool({
 export const calculateExpectedDuties = tool({
   description:
     "Calculate the expected duties and fees for a U.S. import transaction. " +
-    "Returns a complete breakdown of general duty, Section 301/232, " +
+    "Returns a complete breakdown of general duty, Section 122, Section 301/232, " +
     "MPF (Merchandise Processing Fee), HMF (Harbor Maintenance Fee), " +
     "and total landed cost.",
   inputSchema: z.object({
@@ -253,6 +262,10 @@ export const calculateExpectedDuties = tool({
     generalDutyRatePercent: z
       .number()
       .describe("General duty rate as a percentage, e.g. 16.5 for 16.5%"),
+    section122RatePercent: z
+      .number()
+      .default(10)
+      .describe("Section 122 tariff rate as a percentage (default 10% — applies to ALL imports)"),
     section301RatePercent: z
       .number()
       .default(0)
@@ -272,12 +285,14 @@ export const calculateExpectedDuties = tool({
   execute: async ({
     enteredValue,
     generalDutyRatePercent,
+    section122RatePercent,
     section301RatePercent,
     section232RatePercent,
     adCvdRatePercent,
     shippingMethod,
   }) => {
     const generalDuty = enteredValue * (generalDutyRatePercent / 100);
+    const section122 = enteredValue * (section122RatePercent / 100);
     const section301 = enteredValue * (section301RatePercent / 100);
     const section232 = enteredValue * (section232RatePercent / 100);
     const adCvd = enteredValue * (adCvdRatePercent / 100);
@@ -285,13 +300,18 @@ export const calculateExpectedDuties = tool({
     const mpf = Math.max(31.67, Math.min(614.35, mpfRaw));
     const hmf = shippingMethod === "ocean" ? enteredValue * 0.00125 : 0;
 
-    const totalDuties = generalDuty + section301 + section232 + adCvd + mpf + hmf;
+    const totalDuties = generalDuty + section122 + section301 + section232 + adCvd + mpf + hmf;
 
     return {
       enteredValue: enteredValue.toFixed(2),
       generalDuty: {
         rate: `${generalDutyRatePercent}%`,
         amount: generalDuty.toFixed(2),
+      },
+      section122: {
+        rate: `${section122RatePercent}%`,
+        amount: section122.toFixed(2),
+        applicable: section122RatePercent > 0,
       },
       section301: {
         rate: `${section301RatePercent}%`,

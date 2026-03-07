@@ -252,6 +252,7 @@ export default function AuditPage() {
           totalDuties: string;
           enteredValue: string;
           generalDuty: { rate: string; amount: string };
+          section122: { rate: string; amount: string; applicable: boolean };
           section301: { rate: string; amount: string; applicable: boolean };
           section232: { rate: string; amount: string; applicable: boolean };
           mpf: { rate: string; amount: string };
@@ -999,6 +1000,14 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
                     </span>
                     <span>${dutyResult.generalDuty.amount}</span>
                   </div>
+                  {dutyResult.section122?.applicable && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Section 122 ({dutyResult.section122.rate})
+                      </span>
+                      <span>${dutyResult.section122.amount}</span>
+                    </div>
+                  )}
                   {dutyResult.section301?.applicable && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">
