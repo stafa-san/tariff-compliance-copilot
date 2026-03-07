@@ -108,12 +108,12 @@ export async function classifyProduct(
 
   const chapter = primary.htsCode.replace(/\./g, "").slice(0, 2);
 
-  // Section 122 — applies to all countries (customs user fee / processing)
+  // Section 122 — applies to all countries
   specialTariffs.push({
-    name: "Section 122 (Customs User Fee)",
-    rate: 0.3464,
+    name: "Section 122",
+    rate: 10,
     authority: "CBP",
-    htsProvision: "19 USC §58c",
+    htsProvision: "19 USC §1322",
   });
 
   // Section 301 tariffs (China)
@@ -256,7 +256,7 @@ function buildReasoning(
   }
 
   steps.push(
-    `Section 122 Customs User Fee (0.3464%) applies to all imports regardless of country of origin`
+    `Section 122 tariff (10%) applies to all imports regardless of country of origin`
   );
 
   if (section301) {
