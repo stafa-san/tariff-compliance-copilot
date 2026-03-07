@@ -412,8 +412,9 @@ export default function AuditPage() {
         }
       }
 
-      // Extract broker name — look for Broker/Filer field (NOT Importing Carrier)
+      // Extract broker name — look for Box 46, Broker/Filer field (NOT Importing Carrier)
       const brokerPatterns = [
+        /(?:46|Box 46)[.\s:]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
         /(?:Broker\/Filer|Customs Broker|Filer Name|Licensed Broker)[:\s]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
         /(?:Broker\/Filer|Filer)[^\n]*?:\s*([A-Z][A-Za-z &.,'-]{2,50})/,
         /Broker[^\n]*\n\s*([A-Z][A-Za-z &.,'-]{2,50})/,
@@ -487,7 +488,6 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
       "Entered Value",
       "General Duty Rate",
       "Total Duties (Calculated)",
-      "Total Duties (7501)",
       "Discrepancy",
       "Risk Level",
       "Risk Score",
@@ -504,8 +504,9 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
 
     // Try to parse entry number and other fields from 7501 text
     const text7501 = form7501TextRef.current;
-    const entryMatch = text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z0-9-]+)/i);
-    const originMatch = text7501.match(/(?:Country of Origin|origin)[:\s]*\n?\s*([A-Z]{2})/i);
+    const entryMatch = text7501.match(/(?:Entry Number|Filer Code|Entry No)[.\s:]*\n?\s*([A-Z]{2,3}[\s-]?\d{3,10}[\s-]?\d{0,2})/i) ||
+      text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z0-9-]{5,})/i);
+    const originMatch = text7501.match(/(?:Country of Origin|Country of Export|origin|Box 10)[.\s:]*\n?\s*([A-Z]{2})/i);
 
     // Extract broker name from AI findings first, then fallback to regex
     let brokerName = brokerNameRef.current || "";
@@ -536,14 +537,13 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
 
     const row = [
       brokerName,
-      entryMatch?.[1] || "",
+      entryMatch?.[1]?.trim() || "",
       "01",
       htsCodes,
       originMatch?.[1] || "",
       dutyResult?.enteredValue ? `$${dutyResult.enteredValue}` : "",
       dutyResult?.generalDuty?.rate || "",
       dutyResult ? `$${dutyResult.totalDuties}` : "",
-      "", // 7501 declared total extracted from findings
       discrepancy,
       riskResult?.level || "N/A",
       riskResult?.riskScore?.toString() || "",
