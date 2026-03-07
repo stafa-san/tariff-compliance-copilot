@@ -144,9 +144,18 @@ export default function AuditPage() {
   const toolListEndRef = useRef<HTMLDivElement>(null);
 
   /* ---- Claude AI chat (agentic tool-calling) ---- */
+  const [auditError, setAuditError] = useState("");
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/audit" }),
     onFinish: () => setStep(3),
+    onError: (err) => {
+      setAuditError(
+        err.message?.includes("credit") || err.message?.includes("402")
+          ? "Claude API credit limit reached. Please add credits at console.anthropic.com to run audits."
+          : `Audit failed: ${err.message || "Unknown error. Check your API key and credits."}`,
+      );
+      setStep(3);
+    },
   });
 
   const isLoading = status === "streaming" || status === "submitted";
@@ -1065,9 +1074,24 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
             </CardHeader>
             <CardContent className="space-y-3">
               {findings.length === 0 && (
-                <p className="py-4 text-center text-sm text-muted-foreground">
-                  No structured findings recorded.
-                </p>
+                <div className="py-4 text-center">
+                  {auditError ? (
+                    <div className="mx-auto max-w-md rounded-lg border border-red-200 bg-red-50 p-4">
+                      <AlertCircle className="mx-auto mb-2 h-6 w-6 text-red-500" />
+                      <p className="text-sm font-medium text-red-800">{auditError}</p>
+                    </div>
+                  ) : step === 3 && !isLoading ? (
+                    <div className="mx-auto max-w-md rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                      <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-yellow-500" />
+                      <p className="text-sm font-medium text-yellow-800">
+                        No findings were returned. This usually means the Claude API credit limit has been reached.
+                        Check your balance at console.anthropic.com.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No structured findings recorded.</p>
+                  )}
+                </div>
               )}
               {findings.map((finding, i) => {
                 const statusLabel =

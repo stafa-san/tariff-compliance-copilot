@@ -8,15 +8,28 @@ const anthropic = createAnthropic({
 });
 
 export async function POST(req: Request) {
-  const { messages: uiMessages } = await req.json();
+  try {
+    const { messages: uiMessages } = await req.json();
 
-  const result = streamText({
-    model: anthropic("claude-sonnet-4-20250514"),
-    system: AUDIT_SYSTEM_PROMPT,
-    messages: await convertToModelMessages(uiMessages),
-    tools: auditTools,
-    stopWhen: stepCountIs(12),
-  });
+    const result = streamText({
+      model: anthropic("claude-sonnet-4-20250514"),
+      system: AUDIT_SYSTEM_PROMPT,
+      messages: await convertToModelMessages(uiMessages),
+      tools: auditTools,
+      stopWhen: stepCountIs(12),
+    });
 
-  return result.toUIMessageStreamResponse();
+    return result.toUIMessageStreamResponse();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const isCredit = message.includes("credit") || message.includes("billing") || message.includes("quota");
+    return new Response(
+      JSON.stringify({
+        error: isCredit
+          ? "Claude API credit limit reached. Please add credits at console.anthropic.com."
+          : `Audit failed: ${message}`,
+      }),
+      { status: isCredit ? 402 : 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
 }
