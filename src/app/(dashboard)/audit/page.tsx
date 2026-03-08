@@ -429,69 +429,58 @@ export default function AuditPage() {
       //   "46. Broker/Filer Information...\n\nFedEx Express"        (Box 46 area)
 
       // --- BROKER NAME (Box 46) ---
-      // The broker name appears on a line by itself AFTER the "46. Broker/Filer" header
-      // and "47. Broker/Importer File Number" on the same header line.
-      // In the extracted text: "...47. Broker/Importer File Number\n\nFedEx Express\n\nCBP Form..."
+      // The PDF extractor produces a data blob like:
+      //   "...1701FedEx ExpressAirCN..."  (carrier before transport mode)
+      //   "...MPF 31.18FedEx Express7323.93.0080..."  (broker before HTS code)
+      // "FedEx" has mixed case so [A-Z][a-z]+ won't work. Use [A-Za-z]+ instead.
       let brokerName = "";
-      // Split into lines and find the line after "47. Broker" header
-      const lines = form7501Text.split("\n").map((l: string) => l.trim()).filter(Boolean);
-      for (let i = 0; i < lines.length; i++) {
-        if (/47\.\s*Broker/i.test(lines[i]) && lines[i + 1]) {
-          const candidate = lines[i + 1].trim();
-          // Must be a real name, not a form label or "CBP Form"
-          if (candidate.length >= 3 && !/^CBP|^Page|^\d|^OMB|^ENTRY|^DEPARTMENT/i.test(candidate)) {
-            brokerName = candidate;
+
+      // Approach 1: Between "MPF XX.XX" and next HTS code (XXXX.XX) — this is Box 46 broker data
+      const mpfBrokerMatch = form7501Text.match(/MPF\s+[\d.]+\s*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\s*(?=\d{4}\.)/);
+      if (mpfBrokerMatch?.[1]?.trim()) {
+        brokerName = mpfBrokerMatch[1].trim();
+      }
+
+      // Approach 2: Between port code (4 digits) and transport mode (Air/Ocean/Ground)
+      if (!brokerName) {
+        const transportMatch = form7501Text.match(/\d{4}([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\s*(?=Air|Ocean|Ground)/);
+        if (transportMatch?.[1]?.trim()) brokerName = transportMatch[1].trim();
+      }
+
+      // Approach 3: Scan lines after "47. Broker" header — check multiple subsequent lines
+      if (!brokerName) {
+        const lines = form7501Text.split("\n").map((l: string) => l.trim()).filter(Boolean);
+        for (let i = 0; i < lines.length; i++) {
+          if (/47\.\s*Broker/i.test(lines[i])) {
+            // Check next several lines for a real company name
+            for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+              const candidate = lines[j].trim();
+              if (candidate.length >= 3 &&
+                  !/^CBP|^Page|^\d|^OMB|^ENTRY|^DEPARTMENT|^Title|^Line|^Street|^City/i.test(candidate) &&
+                  !/Broker|Filer|Phone|Number|Information|Declarant|Importing|Transport/i.test(candidate)) {
+                brokerName = candidate;
+                break;
+              }
+            }
             break;
           }
         }
       }
-      // Fallback: look for "FedEx Express" or similar carrier name before transport mode in data blob
-      if (!brokerName) {
-        const carrierMatch = form7501Text.match(/(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?=Air|Ocean|Ground)/);
-        if (carrierMatch?.[1]?.trim()) brokerName = carrierMatch[1].trim();
-      }
 
       // --- ENTRY NUMBER (Box 1) ---
-      // In data blob: "ABC1230105/08/2025" — "ABC123" is entry number, "01" is entry type
-      // Match: uppercase letters + digits, followed by "01" + a date pattern
+      // In data blob: "37.ABC1230105/08/2025" — "ABC123" then "01" (entry type) then date
       let entryNumber = "";
       const entryBlobMatch = form7501Text.match(/([A-Z]{2,5}\d{2,7})01\d{2}\/\d{2}\/\d{4}/);
       if (entryBlobMatch?.[1]) {
         entryNumber = entryBlobMatch[1];
       }
-      if (!entryNumber) {
-        // Look for it after the header "1. Filer Code/Entry Number"
-        for (let i = 0; i < lines.length; i++) {
-          if (/1\.\s*Filer Code/i.test(lines[i]) && lines[i + 1]) {
-            const candidate = lines[i + 1].trim();
-            if (/^[A-Z]{2,5}\d{2,7}$/.test(candidate)) {
-              entryNumber = candidate;
-              break;
-            }
-          }
-        }
-      }
 
       // --- COUNTRY OF ORIGIN (Box 10) ---
-      // Near "10. Country of Origin" header, or in data blob after transport mode: "...AirCN..."
+      // In data blob: "...FedEx ExpressAirCN..." — 2-letter code right after transport mode
       let countryOfOrigin = "";
-      for (let i = 0; i < lines.length; i++) {
-        if (/10\.\s*Country of Origin/i.test(lines[i])) {
-          // The country code might be on the next line or embedded in this line
-          const inlineMatch = lines[i].match(/Country of Origin\s+.*?([A-Z]{2})\b/);
-          if (inlineMatch?.[1] && inlineMatch[1] !== "11") {
-            countryOfOrigin = inlineMatch[1];
-          } else if (lines[i + 1]) {
-            const nextLine = lines[i + 1].trim();
-            if (/^[A-Z]{2}$/.test(nextLine)) countryOfOrigin = nextLine;
-          }
-          if (countryOfOrigin) break;
-        }
-      }
-      // Fallback: in data blob "...AirCN..." or "...OceanCN..."
-      if (!countryOfOrigin) {
-        const blobOrigin = form7501Text.match(/(?:Air|Ocean|Ground|Vessel)([A-Z]{2})/);
-        if (blobOrigin?.[1]) countryOfOrigin = blobOrigin[1];
+      const blobOrigin = form7501Text.match(/(?:Air|Ocean|Ground|Vessel)([A-Z]{2})/);
+      if (blobOrigin?.[1]) {
+        countryOfOrigin = blobOrigin[1];
       }
 
       brokerNameRef.current = brokerName;
