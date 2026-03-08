@@ -35,7 +35,7 @@ Groups:
 - **Finding 1 — HTS Code & General Duty**: HTS code validity, description match, general duty rate vs USITC.
 - **Finding 2 — Section 122 (10%)**: Compare expected 10% rate against what the 7501 actually declares. Flag if missing or different.
 - **Finding 3 — Section 301**: The CORRECT current rate is 25% for ALL Chinese imports. Read the ACTUAL rate declared on the 7501 (e.g. the 9903.88.xx line). If the 7501 shows 7.5% but the correct rate is 25%, that is an ERROR — flag the discrepancy with both values.
-- **Finding 4 — Section 232**: Compare expected Section 232 rates against what the 7501 actually declares. Flag if missing or different.
+- **Finding 4 — Section 232**: Section 232 steel/aluminum tariff verification. Verify the rates on the 7501 match the standard Section 232 rates (steel 25%, aluminum 10%, derivatives up to 50%). These are typically correct on the 7501.
 - **Finding 5 — Values & Duties**: Entered value (Box 36A), calculated vs declared duties (Box 44), math checks.
 - **Finding 6 — Parties & Logistics**: Importer, manufacturer (Box 13), carrier (Box 8), broker/filer (Box 46), country of origin (Box 10), mode of transport (Box 9), ports (Box 19/20).
 - **Finding 7 — Quantities & Merchandise**: Description (Box 32), quantities/units (Box 35), gross weight (Box 34A), entry number (Box 1), net quantity.
