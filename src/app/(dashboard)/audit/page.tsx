@@ -421,20 +421,31 @@ export default function AuditPage() {
         }
       }
 
-      // Extract broker name — look for Box 46, Broker/Filer field (NOT Importing Carrier)
-      const brokerPatterns = [
-        /(?:46|Box 46)[.\s:]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-        /(?:Broker\/Filer|Customs Broker|Filer Name|Licensed Broker)[:\s]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-        /(?:Broker\/Filer|Filer)[^\n]*?:\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-        /Broker[^\n]*\n\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-      ];
+      // Extract broker name from Box 46 of 7501
+      // The PDF text often has "46. Broker/Filer Information..." followed by the name
+      // or the data runs together with "FedEx Express" appearing near field 46
       let brokerName = "";
+      const brokerPatterns = [
+        // "46. Broker/Filer Information Name ... FedEx Express" — name after the field label
+        /46\.\s*Broker\/Filer[^\n]*?(?:Number|Phone)\s*(?:\d[\d\s()-]*)?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
+        // Data blob: look for carrier-like name near "FedEx Express" or similar
+        /(?:46|Broker\/Filer)[^\n]*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Express|Logistics|Brokerage|Trade|Customs|Services|Inc|LLC|Corp))/,
+        // After "Phone Number" header text, the actual name follows
+        /Phone Number\s+(?:\d[\d\s()-]*)?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
+        // Fallback: "Broker/Filer" followed by name
+        /(?:Broker\/Filer|Customs Broker|Filer Name)[:\s]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
+      ];
       for (const pattern of brokerPatterns) {
         const match = form7501Text.match(pattern);
         if (match?.[1]?.trim() && match[1].trim().length >= 3) {
           brokerName = match[1].trim();
           break;
         }
+      }
+      // Also check: in the data blob, "FedEx Express" appears right before "Air" or transport mode
+      if (!brokerName) {
+        const carrierMatch = form7501Text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?=Air|Ocean|Ground|Vessel)/);
+        if (carrierMatch?.[1]?.trim()) brokerName = carrierMatch[1].trim();
       }
       brokerNameRef.current = brokerName;
 
@@ -511,27 +522,36 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
     const discrepancy =
       errors.length > 0 ? errors.map((e) => e.title).join("; ") : "None";
 
-    // Try to parse entry number and other fields from 7501 text
+    // Extract key fields directly from the 7501 PDF text
     const text7501 = form7501TextRef.current;
-    const entryMatch = text7501.match(/(?:Entry Number|Filer Code|Entry No)[.\s:]*\n?\s*([A-Z]{2,3}[\s-]?\d{3,10}[\s-]?\d{0,2})/i) ||
-      text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z0-9-]{5,})/i);
-    const originMatch = text7501.match(/(?:Country of Origin|Country of Export|origin|Box 10)[.\s:]*\n?\s*([A-Z]{2})/i);
 
-    // Extract broker name from AI findings first, then fallback to regex
+    // Entry Number (Box 1): e.g. "ABC123" — appears as "1. Filer Code/Entry Number...ABC12301"
+    // In the data blob, entry number is typically at the start: "ABC1230105/08/2025..."
+    const entryMatch = text7501.match(/([A-Z]{2,4}\d{3,10})\d{2}/) ||
+      text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z]{2,4}\d{3,10})/i);
+
+    // Country of Origin (Box 10): appears as "10. Country of Origin...CN" or in data blob
+    // In the blob: after entry data, country code appears e.g. "...1701FedEx ExpressAirCN"
+    const originMatch = text7501.match(/(?:10\.\s*Country of Origin|Country of Origin)[^\n]*?([A-Z]{2})\b/i) ||
+      text7501.match(/Air([A-Z]{2})\b/) ||
+      text7501.match(/Ocean([A-Z]{2})\b/) ||
+      text7501.match(/Ground([A-Z]{2})\b/);
+
+    // Broker Name (Box 46): use the pre-extracted value from PDF parsing
     let brokerName = brokerNameRef.current || "";
-    const brokerFinding = findings.find(
-      (f) => /parties|broker|logistics/i.test(f.field) || /broker/i.test(f.title),
-    );
-    if (brokerFinding) {
-      const brokerMatch = brokerFinding.description.match(
-        /(?:broker|filer)[:\s]*["']?([A-Za-z][A-Za-z &.,'-]{2,40})/i,
+    // Also try to get from AI findings as fallback
+    if (!brokerName) {
+      const brokerFinding = findings.find(
+        (f) => /parties|broker|logistics/i.test(f.field) || /broker/i.test(f.title),
       );
-      if (brokerMatch?.[1]) brokerName = brokerMatch[1].trim();
+      if (brokerFinding) {
+        const brokerMatch = brokerFinding.description.match(
+          /(?:broker|filer)[:\s]*["']?([A-Za-z][A-Za-z &.,'-]{2,40})/i,
+        );
+        if (brokerMatch?.[1]) brokerName = brokerMatch[1].trim();
+      }
     }
-    // Validate broker name — if it contains too many non-alpha chars, it's garbage
-    if (!brokerName || /[^A-Za-z\s&.,'-]/.test(brokerName) && brokerName.replace(/[^A-Za-z]/g, "").length < 3) {
-      brokerName = "See audit report";
-    }
+    if (!brokerName) brokerName = "See audit report";
 
     // Build completeness notes
     const totalChecks = findings.length;
@@ -597,7 +617,7 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
           className="gap-1 border-primary/30 bg-primary/5 text-primary"
         >
           <Sparkles className="h-3 w-3" />
-          Powered by Claude AI
+          Powered by ChatGPT
         </Badge>
       </div>
 
