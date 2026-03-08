@@ -136,8 +136,10 @@ export default function AuditPage() {
   // Store raw extracted text for the prompt
   const invoiceTextRef = useRef<string>("");
   const form7501TextRef = useRef<string>("");
-  // Store broker name extracted from 7501 for CSV
+  // Store fields extracted from 7501 for CSV
   const brokerNameRef = useRef<string>("");
+  const entryNumberRef = useRef<string>("");
+  const countryOfOriginRef = useRef<string>("");
 
   const invoiceInputRef = useRef<HTMLInputElement>(null);
   const form7501InputRef = useRef<HTMLInputElement>(null);
@@ -421,33 +423,80 @@ export default function AuditPage() {
         }
       }
 
-      // Extract broker name from Box 46 of 7501
-      // The PDF text often has "46. Broker/Filer Information..." followed by the name
-      // or the data runs together with "FedEx Express" appearing near field 46
+      // Extract key fields from the 7501 PDF text for CSV export.
+      // The PDF extractor produces text like:
+      //   "ABC1230105/08/202599999999991701FedEx ExpressAirCN..."  (data blob)
+      //   "46. Broker/Filer Information...\n\nFedEx Express"        (Box 46 area)
+
+      // --- BROKER NAME (Box 46) ---
+      // The broker name appears on a line by itself AFTER the "46. Broker/Filer" header
+      // and "47. Broker/Importer File Number" on the same header line.
+      // In the extracted text: "...47. Broker/Importer File Number\n\nFedEx Express\n\nCBP Form..."
       let brokerName = "";
-      const brokerPatterns = [
-        // "46. Broker/Filer Information Name ... FedEx Express" — name after the field label
-        /46\.\s*Broker\/Filer[^\n]*?(?:Number|Phone)\s*(?:\d[\d\s()-]*)?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-        // Data blob: look for carrier-like name near "FedEx Express" or similar
-        /(?:46|Broker\/Filer)[^\n]*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Express|Logistics|Brokerage|Trade|Customs|Services|Inc|LLC|Corp))/,
-        // After "Phone Number" header text, the actual name follows
-        /Phone Number\s+(?:\d[\d\s()-]*)?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-        // Fallback: "Broker/Filer" followed by name
-        /(?:Broker\/Filer|Customs Broker|Filer Name)[:\s]*\n?\s*([A-Z][A-Za-z &.,'-]{2,50})/,
-      ];
-      for (const pattern of brokerPatterns) {
-        const match = form7501Text.match(pattern);
-        if (match?.[1]?.trim() && match[1].trim().length >= 3) {
-          brokerName = match[1].trim();
-          break;
+      // Split into lines and find the line after "47. Broker" header
+      const lines = form7501Text.split("\n").map((l: string) => l.trim()).filter(Boolean);
+      for (let i = 0; i < lines.length; i++) {
+        if (/47\.\s*Broker/i.test(lines[i]) && lines[i + 1]) {
+          const candidate = lines[i + 1].trim();
+          // Must be a real name, not a form label or "CBP Form"
+          if (candidate.length >= 3 && !/^CBP|^Page|^\d|^OMB|^ENTRY|^DEPARTMENT/i.test(candidate)) {
+            brokerName = candidate;
+            break;
+          }
         }
       }
-      // Also check: in the data blob, "FedEx Express" appears right before "Air" or transport mode
+      // Fallback: look for "FedEx Express" or similar carrier name before transport mode in data blob
       if (!brokerName) {
-        const carrierMatch = form7501Text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?=Air|Ocean|Ground|Vessel)/);
+        const carrierMatch = form7501Text.match(/(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?=Air|Ocean|Ground)/);
         if (carrierMatch?.[1]?.trim()) brokerName = carrierMatch[1].trim();
       }
+
+      // --- ENTRY NUMBER (Box 1) ---
+      // In data blob: "ABC1230105/08/2025" — "ABC123" is entry number, "01" is entry type
+      // Match: uppercase letters + digits, followed by "01" + a date pattern
+      let entryNumber = "";
+      const entryBlobMatch = form7501Text.match(/([A-Z]{2,5}\d{2,7})01\d{2}\/\d{2}\/\d{4}/);
+      if (entryBlobMatch?.[1]) {
+        entryNumber = entryBlobMatch[1];
+      }
+      if (!entryNumber) {
+        // Look for it after the header "1. Filer Code/Entry Number"
+        for (let i = 0; i < lines.length; i++) {
+          if (/1\.\s*Filer Code/i.test(lines[i]) && lines[i + 1]) {
+            const candidate = lines[i + 1].trim();
+            if (/^[A-Z]{2,5}\d{2,7}$/.test(candidate)) {
+              entryNumber = candidate;
+              break;
+            }
+          }
+        }
+      }
+
+      // --- COUNTRY OF ORIGIN (Box 10) ---
+      // Near "10. Country of Origin" header, or in data blob after transport mode: "...AirCN..."
+      let countryOfOrigin = "";
+      for (let i = 0; i < lines.length; i++) {
+        if (/10\.\s*Country of Origin/i.test(lines[i])) {
+          // The country code might be on the next line or embedded in this line
+          const inlineMatch = lines[i].match(/Country of Origin\s+.*?([A-Z]{2})\b/);
+          if (inlineMatch?.[1] && inlineMatch[1] !== "11") {
+            countryOfOrigin = inlineMatch[1];
+          } else if (lines[i + 1]) {
+            const nextLine = lines[i + 1].trim();
+            if (/^[A-Z]{2}$/.test(nextLine)) countryOfOrigin = nextLine;
+          }
+          if (countryOfOrigin) break;
+        }
+      }
+      // Fallback: in data blob "...AirCN..." or "...OceanCN..."
+      if (!countryOfOrigin) {
+        const blobOrigin = form7501Text.match(/(?:Air|Ocean|Ground|Vessel)([A-Z]{2})/);
+        if (blobOrigin?.[1]) countryOfOrigin = blobOrigin[1];
+      }
+
       brokerNameRef.current = brokerName;
+      entryNumberRef.current = entryNumber;
+      countryOfOriginRef.current = countryOfOrigin;
 
       setStep(2);
 
@@ -494,6 +543,8 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
     invoiceTextRef.current = "";
     form7501TextRef.current = "";
     brokerNameRef.current = "";
+    entryNumberRef.current = "";
+    countryOfOriginRef.current = "";
     window.location.reload();
   }, []);
 
@@ -522,36 +573,10 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
     const discrepancy =
       errors.length > 0 ? errors.map((e) => e.title).join("; ") : "None";
 
-    // Extract key fields directly from the 7501 PDF text
-    const text7501 = form7501TextRef.current;
-
-    // Entry Number (Box 1): e.g. "ABC123" — appears as "1. Filer Code/Entry Number...ABC12301"
-    // In the data blob, entry number is typically at the start: "ABC1230105/08/2025..."
-    const entryMatch = text7501.match(/([A-Z]{2,4}\d{3,10})\d{2}/) ||
-      text7501.match(/(?:Entry Number|Filer Code)[^\n]*?([A-Z]{2,4}\d{3,10})/i);
-
-    // Country of Origin (Box 10): appears as "10. Country of Origin...CN" or in data blob
-    // In the blob: after entry data, country code appears e.g. "...1701FedEx ExpressAirCN"
-    const originMatch = text7501.match(/(?:10\.\s*Country of Origin|Country of Origin)[^\n]*?([A-Z]{2})\b/i) ||
-      text7501.match(/Air([A-Z]{2})\b/) ||
-      text7501.match(/Ocean([A-Z]{2})\b/) ||
-      text7501.match(/Ground([A-Z]{2})\b/);
-
-    // Broker Name (Box 46): use the pre-extracted value from PDF parsing
-    let brokerName = brokerNameRef.current || "";
-    // Also try to get from AI findings as fallback
-    if (!brokerName) {
-      const brokerFinding = findings.find(
-        (f) => /parties|broker|logistics/i.test(f.field) || /broker/i.test(f.title),
-      );
-      if (brokerFinding) {
-        const brokerMatch = brokerFinding.description.match(
-          /(?:broker|filer)[:\s]*["']?([A-Za-z][A-Za-z &.,'-]{2,40})/i,
-        );
-        if (brokerMatch?.[1]) brokerName = brokerMatch[1].trim();
-      }
-    }
-    if (!brokerName) brokerName = "See audit report";
+    // Use pre-extracted fields from the 7501 PDF (extracted during upload)
+    const brokerName = brokerNameRef.current || "See audit report";
+    const entryNumber = entryNumberRef.current || "";
+    const countryOrigin = countryOfOriginRef.current || "";
 
     // Build completeness notes
     const totalChecks = findings.length;
@@ -566,10 +591,10 @@ Follow your complete audit workflow. Be thorough and precise — this is a real 
 
     const row = [
       brokerName,
-      entryMatch?.[1]?.trim() || "",
+      entryNumber,
       "01",
       htsCodes,
-      originMatch?.[1] || "",
+      countryOrigin,
       dutyResult?.enteredValue ? `$${dutyResult.enteredValue}` : "",
       dutyResult?.generalDuty?.rate || "",
       dutyResult ? `$${dutyResult.totalDuties}` : "",
