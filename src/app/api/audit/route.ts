@@ -16,6 +16,7 @@ export async function POST(req: Request) {
       system: AUDIT_SYSTEM_PROMPT,
       messages: await convertToModelMessages(uiMessages),
       tools: auditTools,
+      temperature: 0,
       stopWhen: stepCountIs(12),
     });
 
