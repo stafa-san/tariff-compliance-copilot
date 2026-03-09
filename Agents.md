@@ -1,7 +1,7 @@
 # Tariff Compliance Copilot
 
 ## Agentic AI Challenge Submission
-**Kautz-Uible Economics Institute - Spring 2026**
+**Kautz-Uible Economics Institute, Spring 2026**
 
 **GitHub:** https://github.com/stafa-san/tariff-compliance-copilot
 **Live Application:** https://tariff-compliance-copilot.vercel.app
@@ -10,9 +10,9 @@
 
 ## 1. The Tariff Problem: Why This Matters Now
 
-U.S. trade policy is in a period of unprecedented volatility. In just the past two years, tariff rates have been announced, revised, paused, and re-imposed - sometimes within the same week. Section 301 tariffs on Chinese goods have escalated from 7.5% to 25%. New Section 122 reciprocal tariffs (10% on all imports) were introduced. Section 232 steel and aluminum tariffs continue to shift with derivative surcharges reaching 50%.
+U.S. trade policy is in a period of unprecedented volatility. In just the past two years, tariff rates have been announced, revised, paused, and re-imposed, sometimes within the same week. Section 301 tariffs on Chinese goods have escalated from 7.5% to 25%. New Section 122 reciprocal tariffs (10% on all imports) were introduced. Section 232 steel and aluminum tariffs continue to shift with derivative surcharges reaching 50%.
 
-**This constant change is the core problem.** Traditional compliance methods - spreadsheets, manual lookups, hired customs brokers - cannot keep pace. A duty rate that was correct last month may be wrong today. A single misclassification or outdated rate can trigger CBP penalties of up to 4× the unpaid duties.
+**This constant change is the core problem.** Traditional compliance methods like spreadsheets, manual lookups, and hired customs brokers simply cannot keep pace. A duty rate that was correct last month may be wrong today. A single misclassification or outdated rate can trigger CBP penalties of up to 4× the unpaid duties.
 
 For the **97% of U.S. importers that are small-to-mid-size businesses**, this compliance burden is existential. Large enterprises employ dedicated customs departments; SMBs are left guessing. **Tariff Compliance Copilot** closes that gap with an autonomous AI agent that audits import documents in real time, using live government data and current tariff schedules.
 
@@ -22,9 +22,9 @@ For the **97% of U.S. importers that are small-to-mid-size businesses**, this co
 
 ### 2.1 How the AI Agent Works
 
-The audit agent is built on **OpenAI's GPT-4o** using the **Vercel AI SDK** with streaming and multi-step tool calling. Unlike a simple chatbot that generates text, the agent autonomously decides which tools to call, in what order, and how to interpret the results - making it truly agentic.
+The audit agent is built on **OpenAI's GPT-4o** using the **Vercel AI SDK** with streaming and multi-step tool calling. Unlike a simple chatbot that generates text, the agent autonomously decides which tools to call, in what order, and how to interpret the results, making it truly agentic.
 
-The agent uses `temperature: 0` for deterministic, consistent audit results across runs - critical for compliance work where reproducibility matters.
+The agent uses `temperature: 0` for deterministic, consistent audit results across runs. This is critical for compliance work where reproducibility matters.
 
 ```
 User uploads documents (Commercial Invoice + CBP Form 7501)
@@ -51,7 +51,7 @@ A key innovation is the agent's built-in provision code mapping table, which ens
 
 | HTS Provision | Tariff Section | Expected Rate | Description |
 |---|---|---|---|
-| 9903.88.01-03 | Section 301 (Lists 1-3) | 25% | China tariff - most goods |
+| 9903.88.01-03 | Section 301 (Lists 1-3) | 25% | China tariff, most goods |
 | 9903.88.15 | Section 301 (List 4A) | 25% (was 7.5%) | If 7501 shows 7.5%, flag as outdated |
 | 9903.03.01 | Section 122 | 10% | Reciprocal tariff on ALL imports |
 | 9903.80.01 | Section 232 (Steel) | 25% | Steel (Ch. 72-73) |
@@ -76,32 +76,32 @@ Each tool is defined with a Zod schema for type-safe input validation and a real
 
 The agent produces findings organized into 7 groups, each containing detailed field-level checks:
 
-1. **HTS Code & General Duty** - Code validity, description match, general duty rate vs USITC
-2. **Section 122 (Reciprocal Tariff)** - Verifies 9903.03.01 at 10% on all imports
-3. **Section 301 (China Tariff)** - Flags outdated 7.5% rate, confirms 25% requirement
-4. **Section 232 (Steel/Aluminum)** - Verifies steel 25%, aluminum 10%, derivatives 50%
-5. **Values & Duties** - Entered value, calculated vs declared duties, math checks
-6. **Parties & Logistics** - Importer, manufacturer, carrier, broker, country, ports
-7. **Quantities & Merchandise** - Descriptions, quantities, weights, entry numbers
+1. **HTS Code & General Duty**: code validity, description match, general duty rate vs USITC
+2. **Section 122 (Reciprocal Tariff)**: verifies 9903.03.01 at 10% on all imports
+3. **Section 301 (China Tariff)**: flags outdated 7.5% rate, confirms 25% requirement
+4. **Section 232 (Steel/Aluminum)**: verifies steel 25%, aluminum 10%, derivatives 50%
+5. **Values & Duties**: entered value, calculated vs declared duties, math checks
+6. **Parties & Logistics**: importer, manufacturer, carrier, broker, country, ports
+7. **Quantities & Merchandise**: descriptions, quantities, weights, entry numbers
 
 Each check is marked: ✅ verified | ⚠️ needs review | ❌ discrepancy found
 
-### 2.5 Data Resilience - USITC Fallback System
+### 2.5 Data Resilience: USITC Fallback System
 
 The `lookup_hts_code` tool implements a two-tier data strategy:
 
-1. **Primary: Live USITC API** - Calls `hts.usitc.gov/reststop/search` with an 8-second timeout
-2. **Fallback: Local HTS database** - ~13,900 entries with duty rates, downloaded via `pnpm run sync-hts`
+1. **Primary: Live USITC API** that calls `hts.usitc.gov/reststop/search` with an 8-second timeout
+2. **Fallback: Local HTS database** with ~13,900 entries and duty rates, downloaded via `pnpm run sync-hts`
 
 Every response includes a `source` field (`"live_usitc_api"` or `"local_fallback"`) so the agent knows data provenance and can note it in findings.
 
 ### 2.6 Key Technical Decisions
 
 - **Streaming with Tool Calls**: The agent streams responses to the UI in real-time, including tool call progress indicators, so users watch the audit happen live.
-- **Deterministic Output**: `temperature: 0` ensures consistent, reproducible audit results - essential for compliance work.
+- **Deterministic Output**: `temperature: 0` ensures consistent, reproducible audit results, which is essential for compliance work.
 - **Provider-Agnostic Tools**: Tool definitions use Zod schemas via the Vercel AI SDK, making them portable across AI providers (OpenAI, Anthropic, etc.).
 - **Server-Side Execution**: All tools execute server-side via Next.js API routes, keeping API keys secure and enabling direct calls to the USITC API without CORS issues.
-- **Autonomous Decision-Making**: The agent decides which tools to call and in what order based on document content - it is not following a hardcoded script.
+- **Autonomous Decision-Making**: The agent decides which tools to call and in what order based on document content. It is not following a hardcoded script.
 - **Graceful Degradation**: If the live USITC API is unavailable, the agent automatically falls back to local data, ensuring audits complete even without internet access.
 
 ---
@@ -116,7 +116,7 @@ The platform directly addresses several key economic concepts from international
 Tariffs function as a tax on imported goods, with the economic burden split between importers/consumers (through higher prices) and foreign producers (through lower export prices). The elasticity of supply and demand determines the split. Our tool helps importers understand their actual tariff burden by calculating precise duty amounts, enabling better pricing decisions.
 
 **Deadweight Loss from Tariffs**
-Every tariff creates deadweight loss - welfare reductions beyond the revenue generated. When duties are miscalculated (either overpaid or underpaid), additional market distortions arise. Our audit agent catches these errors, reducing the inefficiency of the tariff system.
+Every tariff creates deadweight loss, meaning welfare reductions beyond the revenue generated. When duties are miscalculated (either overpaid or underpaid), additional market distortions arise. Our audit agent catches these errors, reducing the inefficiency of the tariff system.
 
 **Trade Diversion (Section 301 Effects)**
 Section 301 tariffs on Chinese goods (now 25% across all lists) have caused massive trade diversion, with importers shifting sourcing to Vietnam, Bangladesh, Thailand, and other countries. Our agent's `check_trade_remedies` tool evaluates these country-specific tariffs, helping importers understand the true cost of different sourcing decisions. The Scenario Simulator lets importers model these diversion decisions directly.
@@ -130,9 +130,9 @@ CBP penalties (up to 4× unpaid duties) create a strong enforcement incentive, b
 ### 3.2 Real-World Impact
 
 - **$3.4 trillion** in goods were imported to the U.S. in 2024
-- **Section 301 tariffs** generated over $79 billion in tariff revenue (2018–2023)
+- **Section 301 tariffs** generated over $79 billion in tariff revenue (2018 to 2023)
 - **SMBs account for 97%** of U.S. importers but lack compliance infrastructure
-- **Average CBP penalty** for classification errors: $10,000–$50,000 per entry
+- **Average CBP penalty** for classification errors: $10,000 to $50,000 per entry
 - **MPF alone** generates ~$2.7 billion annually for CBP
 
 ---
@@ -175,7 +175,7 @@ CBP penalties (up to 4× unpaid duties) create a strong enforcement incentive, b
 - Section 122 (10% all imports), Section 301 (25% China), Section 232 (steel/aluminum)
 - Full fee breakdown: general duty, special tariffs, MPF, HMF
 - Support for ocean, air, and land shipping methods
-- Min/max bounds on MPF ($31.67–$614.35)
+- Min/max bounds on MPF ($31.67 to $614.35)
 
 ### Tariff Scenario Simulator
 - Country-of-origin comparison for sourcing decisions
@@ -204,11 +204,11 @@ The following results were produced by the live AI audit agent using real GPT-4o
 | Section 232 | ✅ info | Not applicable (apparel, not steel/aluminum) |
 | Entered Value | ✅ info | $9,000 matches across documents |
 | Country of Origin | ✅ info | CN consistent on both documents |
-| Quantity Units | ⚠️ warning | Invoice shows 500 pieces, 7501 shows 500 DOZ - needs clarification |
-| MPF Calculation | ⚠️ warning | 7501 shows $31.18 but minimum is $31.67 - $0.49 underpayment |
+| Quantity Units | ⚠️ warning | Invoice shows 500 pieces, 7501 shows 500 DOZ, needs clarification |
+| MPF Calculation | ⚠️ warning | 7501 shows $31.18 but minimum is $31.67, $0.49 underpayment |
 | HMF Assessment | ❌ error | 7501 shows $0 but HMF should be $11.25 for ocean shipment |
 
-**Key Finding:** The agent correctly flagged the outdated Section 301 rate of 7.5% - a real-world compliance error that would result in underpayment and potential CBP penalties.
+**Key Finding:** The agent correctly flagged the outdated Section 301 rate of 7.5%, a real-world compliance error that would result in underpayment and potential CBP penalties.
 
 ---
 
@@ -306,5 +306,5 @@ return result.toUIMessageStreamResponse();
 - Mustapha Nasomah
 - Tyler Motter
 
-**Competition:** Agentic AI Challenge - Kautz-Uible Economics Institute
+**Competition:** Agentic AI Challenge, Kautz-Uible Economics Institute
 **Deadline:** March 9, 2026
