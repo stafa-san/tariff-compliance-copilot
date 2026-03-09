@@ -18,6 +18,7 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     await signOut();
+    window.location.href = "/";
   }, []);
 
   return { user, loading, logout };

@@ -145,7 +145,7 @@ export default function AuditPage() {
   const form7501InputRef = useRef<HTMLInputElement>(null);
   const toolListEndRef = useRef<HTMLDivElement>(null);
 
-  /* ---- Claude AI chat (agentic tool-calling) ---- */
+  /* ---- AI chat (agentic tool-calling) ---- */
   const [auditError, setAuditError] = useState("");
   const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/audit" }),

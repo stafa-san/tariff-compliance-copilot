@@ -163,7 +163,7 @@ export default function LandingPage() {
             <Shield className="h-4 w-4" />
             <span>Tariff Compliance Copilot</span>
           </div>
-          <p>Built with Next.js, Firebase, Claude AI, and shadcn/ui</p>
+          <p>Built with Next.js, Firebase, ChatGPT AI, and shadcn/ui</p>
         </div>
       </footer>
     </div>
