@@ -381,3 +381,19 @@ The best case: we built the compliance intelligence platform that 320,000 U.S. i
 
 *Drafted: February 28, 2026*
 *For discussion between partners before LLC formation*
+
+
+New Updates *******
+
+loader fix
+label the info as correct or replaced with an appropriate term to ensure cmopletelness
+
+also ensuring that both files provided are appropriate and correct. basicaly they should match as a way to ensure that the user doesn't upload the wrong files
+
+Total duties blank
+
+how to score the risk (because it keeps showing N/A)
+
+
+rotation august 4th
+april 2 weeks, , may june, july. 

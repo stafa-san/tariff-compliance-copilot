@@ -25,7 +25,7 @@ export default function AuthLayout({
           </p>
         </div>
         <p className="text-sm text-primary-foreground/60">
-          Built with Next.js, Firebase, Claude AI
+          Built with Next.js, Firebase, ChatGPT AI
         </p>
       </div>
 
