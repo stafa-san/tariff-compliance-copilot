@@ -4,8 +4,18 @@ node_modules/
 .pnp.*
 
 # next.js
-/.next/
-/out/
+.next/
+out/
+
+# expo
+.expo/
+dist/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
 
 # production
 /build
@@ -42,3 +52,6 @@ next-env.d.ts
 
 # HTS data sync temp files
 scripts/hts_full_raw.json
+
+# iOS
+ios/Pods/
