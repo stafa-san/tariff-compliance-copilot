@@ -25,20 +25,23 @@ export interface ParsedHtsResult {
 
 export async function searchHts(keyword: string): Promise<HtsSearchResult[]> {
   try {
-    // Use the web app's API proxy to avoid CORS issues
-    const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://tariff-compliance-copilot.web.app';
-    const response = await fetch(`${API_BASE}/api/hts-proxy?q=${encodeURIComponent(keyword)}`);
+    // Mobile can call USITC directly (no CORS restrictions in RN)
+    const response = await fetch(
+      `${USITC_API_BASE}/search?keyword=${encodeURIComponent(keyword)}`,
+      { headers: { Accept: 'application/json' } }
+    );
 
     if (!response.ok) {
-      // Fallback to direct USITC API
-      const directResponse = await fetch(`${USITC_API_BASE}/getSearch?keyword=${encodeURIComponent(keyword)}`);
-      if (!directResponse.ok) throw new Error('HTS API unavailable');
-      return directResponse.json();
+      // Fallback to web app proxy
+      const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://tariff-compliance-copilot.vercel.app';
+      const proxyResponse = await fetch(`${API_BASE}/api/hts-proxy?q=${encodeURIComponent(keyword)}`);
+      if (!proxyResponse.ok) throw new Error('HTS API unavailable');
+      return proxyResponse.json();
     }
 
     return response.json();
   } catch (error) {
-    console.error('HTS search failed:', error);
+    console.warn('HTS search failed:', error);
     return [];
   }
 }
