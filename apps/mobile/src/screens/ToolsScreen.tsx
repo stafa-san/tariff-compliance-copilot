@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Card } from '../components/ui';
 import { colors, spacing, typography, borderRadius, shadows } from '../theme';
 import type { MainTabScreenProps } from '../navigation/types';
@@ -9,8 +11,7 @@ interface ToolItem {
   key: string;
   title: string;
   description: string;
-  icon: string;
-  screen: keyof import('../types').RootStackParamList | null;
+  icon: keyof typeof Ionicons.glyphMap;
   color: string;
 }
 
@@ -19,32 +20,28 @@ const TOOLS: ToolItem[] = [
     key: 'scenarios',
     title: 'Scenario Simulator',
     description: 'Compare sourcing countries and analyze tariff impact on landed costs',
-    icon: '\u{1F30D}',
-    screen: null,
+    icon: 'globe-outline',
     color: colors.primary[600],
   },
   {
     key: 'form7501',
     title: 'CBP Form 7501 Guide',
     description: 'Field-by-field reference for the Entry Summary form (47 fields)',
-    icon: '\u{1F4CB}',
-    screen: null,
+    icon: 'document-text-outline',
     color: colors.accent[600],
   },
   {
     key: 'audit',
     title: 'AI Compliance Audit',
     description: 'Upload documents for automated compliance review and risk scoring',
-    icon: '\u{1F50D}',
-    screen: null,
+    icon: 'shield-checkmark-outline',
     color: colors.success[600],
   },
   {
     key: 'reports',
     title: 'Compliance Reports',
     description: 'Generate and export classification, duty, and audit reports',
-    icon: '\u{1F4CA}',
-    screen: null,
+    icon: 'bar-chart-outline',
     color: colors.warning[600],
   },
 ];
@@ -57,35 +54,39 @@ export function ToolsScreen({ navigation }: MainTabScreenProps<'Tools'>) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Tools</Text>
-        <Text style={styles.subtitle}>
-          Advanced compliance tools and reference guides
-        </Text>
+        <Animated.View entering={FadeInDown.duration(400)}>
+          <Text style={styles.title}>Tools</Text>
+          <Text style={styles.subtitle}>
+            Advanced compliance tools and reference guides
+          </Text>
+        </Animated.View>
 
-        {TOOLS.map((tool) => (
-          <TouchableOpacity
-            key={tool.key}
-            activeOpacity={0.7}
-            onPress={() => {
-              // Navigate to sub-screens when implemented
-              // For now, tools expand inline or navigate to stack screens
-            }}
-          >
-            <View style={[styles.toolCard, shadows.sm]}>
-              <View style={[styles.iconContainer, { backgroundColor: tool.color + '15' }]}>
-                <Text style={styles.toolIcon}>{tool.icon}</Text>
+        {TOOLS.map((tool, index) => (
+          <Animated.View key={tool.key} entering={FadeInDown.delay(100 * (index + 1)).duration(400)}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                if (tool.key === 'audit') {
+                  navigation.getParent()?.navigate('Audit');
+                }
+              }}
+            >
+              <View style={[styles.toolCard, shadows.sm]}>
+                <View style={[styles.iconContainer, { backgroundColor: tool.color + '15' }]}>
+                  <Ionicons name={tool.icon} size={24} color={tool.color} />
+                </View>
+                <View style={styles.toolContent}>
+                  <Text style={styles.toolTitle}>{tool.title}</Text>
+                  <Text style={styles.toolDescription}>{tool.description}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.neutral[400]} />
               </View>
-              <View style={styles.toolContent}>
-                <Text style={styles.toolTitle}>{tool.title}</Text>
-                <Text style={styles.toolDescription}>{tool.description}</Text>
-              </View>
-              <Text style={styles.chevron}>{'\u203A'}</Text>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </Animated.View>
         ))}
 
         {/* Trade Remedies Quick Reference */}
-        <View style={styles.referenceSection}>
+        <Animated.View entering={FadeInDown.delay(500).duration(400)} style={styles.referenceSection}>
           <Text style={styles.referenceTitle}>Quick Reference</Text>
 
           <Card style={styles.referenceCard}>
@@ -124,10 +125,10 @@ export function ToolsScreen({ navigation }: MainTabScreenProps<'Tools'>) {
           <Card style={styles.referenceCard}>
             <Text style={styles.refHeader}>FTA Exempt Countries</Text>
             <Text style={styles.refBody}>
-              Mexico (USMCA) {'\u00B7'} Canada (USMCA) {'\u00B7'} South Korea (KORUS) {'\u00B7'} Australia (AUSFTA)
+              Mexico (USMCA) · Canada (USMCA) · South Korea (KORUS) · Australia (AUSFTA)
             </Text>
           </Card>
-        </View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -155,11 +156,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolIcon: { fontSize: 24 },
   toolContent: { flex: 1 },
   toolTitle: { ...typography.bodyMedium, color: colors.neutral[900], marginBottom: 2 },
   toolDescription: { ...typography.caption, color: colors.neutral[500], lineHeight: 18 },
-  chevron: { fontSize: 24, color: colors.neutral[400] },
   referenceSection: { marginTop: spacing['2xl'] },
   referenceTitle: { ...typography.h3, color: colors.neutral[900], marginBottom: spacing.md },
   referenceCard: { marginBottom: spacing.md },

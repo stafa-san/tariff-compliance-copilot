@@ -8,6 +8,7 @@ import {
   StyleSheet,
   SafeAreaView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, borderRadius, spacing, typography, shadows } from '../../theme';
 
 interface SelectOption {
@@ -46,7 +47,7 @@ export function Select({
         <Text style={[styles.triggerText, !selectedOption && styles.placeholder]}>
           {selectedOption?.label || placeholder}
         </Text>
-        <Text style={styles.chevron}>&#9662;</Text>
+        <Ionicons name="chevron-down" size={16} color={colors.neutral[500]} />
       </TouchableOpacity>
       {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -87,7 +88,7 @@ export function Select({
                       {item.label}
                     </Text>
                     {item.value === value && (
-                      <Text style={styles.checkmark}>&#10003;</Text>
+                      <Ionicons name="checkmark" size={18} color={colors.primary[600]} />
                     )}
                   </TouchableOpacity>
                 )}

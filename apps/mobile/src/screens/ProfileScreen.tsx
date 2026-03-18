@@ -8,12 +8,14 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppStore } from '../store';
 import { getUserShipments } from '../services/firestore';
-import { Card, Button, Badge, SectionHeader, EmptyState } from '../components/ui';
+import { Card, Button, Badge, EmptyState } from '../components/ui';
 import { colors, spacing, typography, borderRadius, shadows } from '../theme';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency } from '../utils/format';
 import type { MainTabScreenProps } from '../navigation/types';
 
 export function ProfileScreen({ navigation }: MainTabScreenProps<'Profile'>) {
@@ -55,7 +57,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<'Profile'>) {
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Header */}
-        <View style={styles.profileHeader}>
+        <Animated.View entering={FadeInDown.duration(400)} style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
             <Text style={styles.avatarText}>
               {(user?.displayName || user?.email || 'U')[0].toUpperCase()}
@@ -67,68 +69,76 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<'Profile'>) {
             </Text>
             <Text style={styles.profileEmail}>{user?.email}</Text>
           </View>
-        </View>
+        </Animated.View>
 
         {/* Shipments Section */}
-        <SectionHeader
-          title={`Shipments (${shipments.length})`}
-          action="+ New"
-          onAction={() => navigation.getParent()?.navigate('ShipmentCreate')}
-        />
-
-        {shipments.length === 0 ? (
-          <EmptyState
-            title="No Shipments Yet"
-            description="Track your imports by creating a new shipment"
-            actionLabel="Create Shipment"
-            onAction={() => navigation.getParent()?.navigate('ShipmentCreate')}
-          />
-        ) : (
-          shipments.map((shipment) => (
+        <Animated.View entering={FadeInDown.delay(100).duration(400)}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Shipments ({shipments.length})</Text>
             <TouchableOpacity
-              key={shipment.id}
-              onPress={() =>
-                navigation.getParent()?.navigate('ShipmentDetail', { shipmentId: shipment.id })
-              }
-              activeOpacity={0.7}
+              style={styles.addButton}
+              onPress={() => navigation.getParent()?.navigate('ShipmentCreate')}
             >
-              <Card style={styles.shipmentCard}>
-                <View style={styles.shipmentRow}>
-                  <View style={styles.shipmentInfo}>
-                    <Text style={styles.shipmentProduct} numberOfLines={1}>
-                      {shipment.product}
-                    </Text>
-                    <Text style={styles.shipmentMeta}>
-                      {shipment.supplierCountry} &middot; {shipment.htsCode || 'Unclassified'}
-                    </Text>
-                    <Text style={styles.shipmentValue}>
-                      {formatCurrency(shipment.totalValue)} &middot; {shipment.quantity} pcs
-                    </Text>
-                  </View>
-                  <Badge
-                    label={shipment.status}
-                    variant={
-                      shipment.status === 'filed'
-                        ? 'success'
-                        : shipment.status === 'reviewed'
-                        ? 'info'
-                        : shipment.status === 'classified'
-                        ? 'warning'
-                        : 'default'
-                    }
-                  />
-                </View>
-              </Card>
+              <Ionicons name="add" size={16} color={colors.primary[600]} />
+              <Text style={styles.addButtonText}>New</Text>
             </TouchableOpacity>
-          ))
-        )}
+          </View>
+
+          {shipments.length === 0 ? (
+            <EmptyState
+              title="No Shipments Yet"
+              description="Track your imports by creating a new shipment"
+              actionLabel="Create Shipment"
+              onAction={() => navigation.getParent()?.navigate('ShipmentCreate')}
+            />
+          ) : (
+            shipments.map((shipment) => (
+              <TouchableOpacity
+                key={shipment.id}
+                onPress={() =>
+                  navigation.getParent()?.navigate('ShipmentDetail', { shipmentId: shipment.id })
+                }
+                activeOpacity={0.7}
+              >
+                <Card style={styles.shipmentCard}>
+                  <View style={styles.shipmentRow}>
+                    <View style={styles.shipmentInfo}>
+                      <Text style={styles.shipmentProduct} numberOfLines={1}>
+                        {shipment.product}
+                      </Text>
+                      <Text style={styles.shipmentMeta}>
+                        {shipment.supplierCountry} · {shipment.htsCode || 'Unclassified'}
+                      </Text>
+                      <Text style={styles.shipmentValue}>
+                        {formatCurrency(shipment.totalValue)} · {shipment.quantity} pcs
+                      </Text>
+                    </View>
+                    <Badge
+                      label={shipment.status}
+                      variant={
+                        shipment.status === 'filed'
+                          ? 'success'
+                          : shipment.status === 'reviewed'
+                          ? 'info'
+                          : shipment.status === 'classified'
+                          ? 'warning'
+                          : 'default'
+                      }
+                    />
+                  </View>
+                </Card>
+              </TouchableOpacity>
+            ))
+          )}
+        </Animated.View>
 
         {/* Account Actions */}
-        <View style={styles.accountSection}>
-          <SectionHeader title="Account" />
+        <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.accountSection}>
+          <Text style={styles.sectionTitle}>Account</Text>
           <Card>
-            <MenuItem label="Privacy Policy" onPress={() => navigation.getParent()?.navigate('PrivacyPolicy')} />
-            <MenuItem label="Terms of Service" onPress={() => navigation.getParent()?.navigate('TermsOfService')} />
+            <MenuItem icon="shield-outline" label="Privacy Policy" onPress={() => {}} />
+            <MenuItem icon="document-text-outline" label="Terms of Service" onPress={() => {}} />
+            <MenuItem icon="help-circle-outline" label="Help & Support" onPress={() => {}} last />
           </Card>
           <Button
             title="Sign Out"
@@ -136,17 +146,34 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<'Profile'>) {
             variant="outline"
             style={styles.logoutButton}
           />
-        </View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function MenuItem({ label, onPress }: { label: string; onPress: () => void }) {
+function MenuItem({
+  icon,
+  label,
+  onPress,
+  last,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  last?: boolean;
+}) {
   return (
-    <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.6}>
-      <Text style={styles.menuLabel}>{label}</Text>
-      <Text style={styles.menuChevron}>{'\u203A'}</Text>
+    <TouchableOpacity
+      style={[styles.menuItem, last && styles.menuItemLast]}
+      onPress={onPress}
+      activeOpacity={0.6}
+    >
+      <View style={styles.menuLeft}>
+        <Ionicons name={icon} size={20} color={colors.neutral[500]} />
+        <Text style={styles.menuLabel}>{label}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.neutral[400]} />
     </TouchableOpacity>
   );
 }
@@ -173,6 +200,23 @@ const styles = StyleSheet.create({
   profileInfo: { flex: 1 },
   profileName: { ...typography.h2, color: colors.neutral[900] },
   profileEmail: { ...typography.body, color: colors.neutral[500], marginTop: 2 },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  sectionTitle: { ...typography.h3, color: colors.neutral[900] },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.primary[50],
+  },
+  addButtonText: { ...typography.captionMedium, color: colors.primary[600] },
   shipmentCard: { marginBottom: spacing.sm },
   shipmentRow: {
     flexDirection: 'row',
@@ -192,7 +236,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.neutral[100],
   },
+  menuItemLast: {
+    borderBottomWidth: 0,
+  },
+  menuLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
   menuLabel: { ...typography.body, color: colors.neutral[700] },
-  menuChevron: { fontSize: 20, color: colors.neutral[400] },
   logoutButton: { marginTop: spacing.xl },
 });

@@ -29,8 +29,7 @@
     "production": {
       "ios": {
         "appleId": "stafadigital@gmail.com",
-        "appleTeamId": "68B846JQDU",
-        "ascAppId": ""
+        "appleTeamId": "68B846JQDU"
       }
     }
   }

@@ -9,15 +9,19 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
+import { useGoogleAuth } from '../../services/auth/googleAuth';
 import { Button, Input } from '../../components/ui';
 import { colors, spacing, typography, borderRadius } from '../../theme';
 import type { RootStackScreenProps } from '../../navigation/types';
 
 export function LoginScreen({ navigation }: RootStackScreenProps<'Login'>) {
   const { signIn, isLoading, error, clearError } = useAuth();
+  const { signInWithGoogle, isReady } = useGoogleAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) return;
@@ -25,6 +29,17 @@ export function LoginScreen({ navigation }: RootStackScreenProps<'Login'>) {
       await signIn(email.trim(), password);
     } catch {
       // Error handled by auth context
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch {
+      // Error handled silently — user cancelled or network issue
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -41,7 +56,7 @@ export function LoginScreen({ navigation }: RootStackScreenProps<'Login'>) {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.logoContainer}>
-              <Text style={styles.logoIcon}>&#9878;</Text>
+              <Ionicons name="shield-checkmark" size={32} color={colors.white} />
             </View>
             <Text style={styles.title}>Tariff Copilot</Text>
             <Text style={styles.subtitle}>
@@ -91,6 +106,26 @@ export function LoginScreen({ navigation }: RootStackScreenProps<'Login'>) {
               disabled={!email.trim() || !password.trim()}
               style={styles.signInButton}
             />
+
+            {/* Divider */}
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Google Sign In */}
+            <TouchableOpacity
+              style={styles.googleButton}
+              onPress={handleGoogleSignIn}
+              disabled={!isReady || googleLoading}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.googleIcon}>G</Text>
+              <Text style={styles.googleButtonText}>
+                {googleLoading ? 'Signing in...' : 'Continue with Google'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Footer */}
@@ -131,8 +166,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   logoIcon: {
-    fontSize: 32,
-    color: colors.white,
+    // kept for layout reference
   },
   title: {
     ...typography.h1,
@@ -163,6 +197,42 @@ const styles = StyleSheet.create({
   },
   signInButton: {
     marginTop: spacing.sm,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.xs,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.neutral[200],
+  },
+  dividerText: {
+    ...typography.caption,
+    color: colors.neutral[400],
+    marginHorizontal: spacing.md,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.neutral[300],
+    borderRadius: borderRadius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+  },
+  googleIcon: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    ...typography.bodyMedium,
+    color: colors.neutral[700],
   },
   footer: {
     flexDirection: 'row',

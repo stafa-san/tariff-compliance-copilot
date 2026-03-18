@@ -10,17 +10,20 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { useGoogleAuth } from '../../services/auth/googleAuth';
 import { Button, Input } from '../../components/ui';
 import { colors, spacing, typography, borderRadius } from '../../theme';
 import type { RootStackScreenProps } from '../../navigation/types';
 
 export function RegisterScreen({ navigation }: RootStackScreenProps<'Register'>) {
   const { signUp, isLoading, error, clearError } = useAuth();
+  const { signInWithGoogle, isReady } = useGoogleAuth();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState('');
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleRegister = async () => {
     setLocalError('');
@@ -36,6 +39,17 @@ export function RegisterScreen({ navigation }: RootStackScreenProps<'Register'>)
       await signUp(email.trim(), password, displayName.trim() || undefined);
     } catch {
       // Error handled by auth context
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch {
+      // Error handled silently
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -64,6 +78,26 @@ export function RegisterScreen({ navigation }: RootStackScreenProps<'Register'>)
                 <Text style={styles.errorText}>{displayError}</Text>
               </View>
             )}
+
+            {/* Google Sign Up */}
+            <TouchableOpacity
+              style={styles.googleButton}
+              onPress={handleGoogleSignUp}
+              disabled={!isReady || googleLoading}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.googleIcon}>G</Text>
+              <Text style={styles.googleButtonText}>
+                {googleLoading ? 'Signing up...' : 'Sign up with Google'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
 
             <Input
               label="Full Name"
@@ -152,6 +186,42 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   errorText: { ...typography.body, color: colors.danger[700] },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.xs,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.neutral[200],
+  },
+  dividerText: {
+    ...typography.caption,
+    color: colors.neutral[400],
+    marginHorizontal: spacing.md,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.neutral[300],
+    borderRadius: borderRadius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+  },
+  googleIcon: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    ...typography.bodyMedium,
+    color: colors.neutral[700],
+  },
   registerButton: { marginTop: spacing.sm },
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: spacing['3xl'] },
   footerText: { ...typography.body, color: colors.neutral[500] },

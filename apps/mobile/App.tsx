@@ -1,13 +1,14 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, StatusBar, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
 
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
-import { colors, typography, spacing, borderRadius } from './src/theme';
+import { colors, typography, spacing } from './src/theme';
 import type { RootStackParamList, MainTabParamList } from './src/types';
 
 // Screens
@@ -19,25 +20,18 @@ import { CalculatorScreen } from './src/screens/CalculatorScreen';
 import { ToolsScreen } from './src/screens/ToolsScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { ShipmentCreateScreen } from './src/screens/ShipmentCreateScreen';
+import { AuditScreen } from './src/screens/AuditScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-// ─── Tab Icons ───
-function TabIcon({ name, focused }: { name: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Dashboard: '\u{1F3E0}',
-    Classify: '\u{1F50D}',
-    Calculator: '\u{1F4B0}',
-    Tools: '\u{1F6E0}',
-    Profile: '\u{1F464}',
-  };
-  return (
-    <Text style={{ fontSize: focused ? 22 : 20, opacity: focused ? 1 : 0.5 }}>
-      {icons[name] || '\u{2B50}'}
-    </Text>
-  );
-}
+const TAB_ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap }> = {
+  Dashboard: { focused: 'grid', unfocused: 'grid-outline' },
+  Classify: { focused: 'search', unfocused: 'search-outline' },
+  Calculator: { focused: 'calculator', unfocused: 'calculator-outline' },
+  Tools: { focused: 'construct', unfocused: 'construct-outline' },
+  Profile: { focused: 'person', unfocused: 'person-outline' },
+};
 
 // ─── Main Tab Navigator ───
 function MainTabs() {
@@ -45,7 +39,11 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarIcon: ({ focused }) => <TabIcon name={route.name} focused={focused} />,
+        tabBarIcon: ({ focused, color, size }) => {
+          const iconSet = TAB_ICONS[route.name] || TAB_ICONS.Dashboard;
+          const iconName = focused ? iconSet.focused : iconSet.unfocused;
+          return <Ionicons name={iconName} size={22} color={color} />;
+        },
         tabBarActiveTintColor: colors.primary[600],
         tabBarInactiveTintColor: colors.neutral[400],
         tabBarStyle: {
@@ -94,7 +92,6 @@ function AppNavigator() {
       }}
     >
       {authState === 'unauthenticated' ? (
-        // Auth flow
         <>
           <Stack.Screen
             name="Login"
@@ -108,7 +105,6 @@ function AppNavigator() {
           />
         </>
       ) : (
-        // Authenticated flow
         <>
           <Stack.Screen
             name="MainTabs"
@@ -119,6 +115,11 @@ function AppNavigator() {
             name="ShipmentCreate"
             component={ShipmentCreateScreen}
             options={{ title: 'New Shipment', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="Audit"
+            component={AuditScreen}
+            options={{ headerShown: false }}
           />
         </>
       )}
