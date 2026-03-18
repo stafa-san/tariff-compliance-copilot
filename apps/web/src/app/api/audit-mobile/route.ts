@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { streamText, stepCountIs } from "ai";
 import { auditTools } from "@/lib/ai/audit-tools";
 import { AUDIT_SYSTEM_PROMPT } from "@/lib/ai/audit-prompt";
 
@@ -20,59 +20,41 @@ export async function POST(req: Request) {
       }),
     );
 
-    const result = await generateText({
+    // Use streamText (same as web app) but collect results instead of streaming
+    const result = streamText({
       model: openai("gpt-4o"),
       system: AUDIT_SYSTEM_PROMPT,
       messages: modelMessages,
       tools: auditTools,
       temperature: 0,
-      maxSteps: 12,
+      stopWhen: stepCountIs(12),
     });
 
-    // Extract from all steps
+    // Collect all tool calls and text from the stream
     const findings: unknown[] = [];
     let dutyResult = null;
     let riskResult = null;
+    let summary = "";
 
-    for (const step of result.steps || []) {
-      // Check toolCalls for report_finding args
-      for (const tc of step.toolCalls || []) {
-        if (tc.toolName === "report_finding") {
-          findings.push(tc.args);
+    for await (const part of result.fullStream) {
+      if (part.type === "tool-call" && part.toolName === "report_finding") {
+        findings.push(part.args);
+      }
+
+      if (part.type === "tool-result") {
+        const res = part.result as Record<string, unknown>;
+        const toolName = part.toolName;
+
+        if (toolName === "calculate_expected_duties" || res?.totalDuties !== undefined) {
+          dutyResult = res;
+        }
+        if (toolName === "calculate_risk_score" || (res?.score !== undefined && res?.level !== undefined)) {
+          riskResult = res;
         }
       }
 
-      // Check toolResults for calculated values
-      // toolResults can have .result or .output depending on SDK version
-      for (const tr of step.toolResults || []) {
-        const res =
-          (tr as any).result ?? (tr as any).output ?? {};
-        const toolName = (tr as any).toolName ?? "";
-
-        if (toolName === "report_finding" || (res?.field && res?.severity)) {
-          // Avoid duplicates (already added from toolCalls)
-          if (
-            !findings.some(
-              (f: any) => f.field === res.field && f.title === res.title,
-            )
-          ) {
-            findings.push(res);
-          }
-        }
-
-        if (
-          toolName === "calculate_expected_duties" ||
-          res?.totalDuties !== undefined
-        ) {
-          dutyResult = res;
-        }
-
-        if (
-          toolName === "calculate_risk_score" ||
-          (res?.score !== undefined && res?.level !== undefined)
-        ) {
-          riskResult = res;
-        }
+      if (part.type === "text-delta") {
+        summary += part.textDelta;
       }
     }
 
@@ -80,8 +62,7 @@ export async function POST(req: Request) {
       findings,
       dutyResult,
       riskResult,
-      summary: result.text || "",
-      stepCount: result.steps?.length ?? 0,
+      summary,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
