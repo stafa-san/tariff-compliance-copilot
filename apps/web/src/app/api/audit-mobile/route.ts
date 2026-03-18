@@ -90,17 +90,49 @@ export async function POST(req: Request) {
       }
     }
 
+    // Debug: log the actual structure
+    const debugInfo: Record<string, unknown> = {
+      stepCount: result.steps?.length ?? 0,
+      textLength: result.text?.length ?? 0,
+    };
+
+    if (result.steps?.length) {
+      const step0 = result.steps[0];
+      debugInfo.step0Keys = Object.keys(step0);
+      debugInfo.step0ToolCallCount = step0.toolCalls?.length ?? 0;
+      debugInfo.step0ToolResultCount = step0.toolResults?.length ?? 0;
+      if (step0.toolCalls?.length) {
+        debugInfo.step0ToolNames = step0.toolCalls.map((tc: any) => tc.toolName);
+      }
+      if (step0.toolResults?.length) {
+        debugInfo.step0ResultSample = JSON.stringify(step0.toolResults[0]).slice(0, 200);
+      }
+    }
+
+    // Also try extracting from all steps more aggressively
+    for (const step of result.steps || []) {
+      const trs = step.toolResults || [];
+      for (const tr of trs) {
+        const toolName = (tr as any).toolName;
+        const res = tr.result as Record<string, unknown>;
+        if (toolName === "report_finding" || (res?.field && res?.severity)) {
+          findings.push(res);
+        }
+        if (toolName === "calculate_expected_duties" || res?.totalDuties !== undefined) {
+          dutyResult = res;
+        }
+        if (toolName === "calculate_risk_score" || (res?.score !== undefined && res?.level !== undefined)) {
+          riskResult = res;
+        }
+      }
+    }
+
     return Response.json({
       findings,
       dutyResult,
       riskResult,
       summary: result.text || "",
-      debug: {
-        stepCount: result.steps?.length ?? 0,
-        hasToolCalls: !!(result as any).toolCalls,
-        hasToolResults: !!(result as any).toolResults,
-        textLength: result.text?.length ?? 0,
-      },
+      debug: debugInfo,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
