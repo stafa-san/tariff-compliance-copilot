@@ -1,9 +1,18 @@
-import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  sendPasswordResetEmail,
+  updateProfile,
+  deleteUser,
+  User,
+} from 'firebase/auth';
+import { auth } from '../firebase';
 
-export type AuthUser = FirebaseAuthTypes.User;
+export type AuthUser = User;
 
 export async function signInWithEmail(email: string, password: string): Promise<AuthUser> {
-  const credential = await auth().signInWithEmailAndPassword(email, password);
+  const credential = await signInWithEmailAndPassword(auth, email, password);
   return credential.user;
 }
 
@@ -12,25 +21,25 @@ export async function signUpWithEmail(
   password: string,
   displayName?: string
 ): Promise<AuthUser> {
-  const credential = await auth().createUserWithEmailAndPassword(email, password);
-  if (displayName) {
-    await credential.user.updateProfile({ displayName });
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  if (displayName && credential.user) {
+    await updateProfile(credential.user, { displayName });
   }
   return credential.user;
 }
 
 export async function signOut(): Promise<void> {
-  await auth().signOut();
+  await firebaseSignOut(auth);
 }
 
 export async function resetPassword(email: string): Promise<void> {
-  await auth().sendPasswordResetEmail(email);
+  await sendPasswordResetEmail(auth, email);
 }
 
 export async function deleteAccount(): Promise<void> {
-  const user = auth().currentUser;
+  const user = auth.currentUser;
   if (user) {
-    await user.delete();
+    await deleteUser(user);
   }
 }
 

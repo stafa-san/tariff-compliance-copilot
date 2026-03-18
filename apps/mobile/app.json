@@ -23,8 +23,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Used to scan documents and invoices for compliance analysis",
         "NSPhotoLibraryUsageDescription": "Used to upload documents and invoices for compliance analysis"
-      },
-      "googleServicesFile": "./GoogleService-Info.plist"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -32,32 +31,21 @@
         "backgroundColor": "#0F172A"
       },
       "package": "com.tariffcopilot.app",
-      "versionCode": 1,
-      "googleServicesFile": "./google-services.json"
+      "versionCode": 1
     },
     "plugins": [
-      "@react-native-firebase/app",
-      "@react-native-firebase/auth",
-      [
-        "expo-build-properties",
-        {
-          "ios": {
-            "useFrameworks": "static"
-          }
-        }
-      ],
-      "expo-font"
+      "expo-font",
+      "expo-updates",
+      "expo-document-picker"
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "7436baf4-6fc5-4f11-be5a-fb0ac01e9aff"
       }
     },
     "updates": {
-      "url": ""
+      "url": "https://u.expo.dev/7436baf4-6fc5-4f11-be5a-fb0ac01e9aff"
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    }
+    "runtimeVersion": "1.0.0"
   }
 }

@@ -1,4 +1,18 @@
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
+  Timestamp,
+} from 'firebase/firestore';
+import { db } from './firebase';
 import { Shipment, Report } from '../types';
 
 // ─── Generic CRUD ───
@@ -7,29 +21,26 @@ export async function getDocument<T>(
   collectionName: string,
   id: string
 ): Promise<T | null> {
-  const doc = await firestore().collection(collectionName).doc(id).get();
-  if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() } as T;
+  const docRef = doc(db, collectionName, id);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return null;
+  return { id: docSnap.id, ...docSnap.data() } as T;
 }
 
 export async function getDocuments<T>(
-  collectionName: string,
-  ...constraints: FirebaseFirestoreTypes.QueryFilterConstraint[]
+  collectionName: string
 ): Promise<T[]> {
-  let query: FirebaseFirestoreTypes.Query = firestore().collection(collectionName);
-
-  // Apply constraints are handled via chaining in the calling code
-  const snapshot = await query.get();
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as T));
+  const snapshot = await getDocs(collection(db, collectionName));
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as T));
 }
 
 export async function addDocument(
   collectionName: string,
   data: Record<string, unknown>
 ): Promise<string> {
-  const docRef = await firestore().collection(collectionName).add({
+  const docRef = await addDoc(collection(db, collectionName), {
     ...data,
-    createdAt: firestore.FieldValue.serverTimestamp(),
+    createdAt: serverTimestamp(),
   });
   return docRef.id;
 }
@@ -39,9 +50,10 @@ export async function updateDocument(
   id: string,
   data: Record<string, unknown>
 ): Promise<void> {
-  await firestore().collection(collectionName).doc(id).update({
+  const docRef = doc(db, collectionName, id);
+  await updateDoc(docRef, {
     ...data,
-    updatedAt: firestore.FieldValue.serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 }
 
@@ -49,24 +61,32 @@ export async function deleteDocument(
   collectionName: string,
   id: string
 ): Promise<void> {
-  await firestore().collection(collectionName).doc(id).delete();
+  await deleteDoc(doc(db, collectionName, id));
 }
 
 // ─── Shipments ───
 
 export async function getUserShipments(userId: string): Promise<Shipment[]> {
-  const snapshot = await firestore()
-    .collection('shipments')
-    .where('userId', '==', userId)
-    .orderBy('createdAt', 'desc')
-    .get();
+  const q = query(
+    collection(db, 'shipments'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  const snapshot = await getDocs(q);
 
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate() || new Date(),
-    updatedAt: doc.data().updatedAt?.toDate(),
-  })) as Shipment[];
+  return snapshot.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      ...data,
+      createdAt: data.createdAt instanceof Timestamp
+        ? data.createdAt.toDate()
+        : new Date(),
+      updatedAt: data.updatedAt instanceof Timestamp
+        ? data.updatedAt.toDate()
+        : undefined,
+    };
+  }) as Shipment[];
 }
 
 export async function createShipment(
@@ -82,17 +102,23 @@ export async function deleteShipment(id: string): Promise<void> {
 // ─── Reports ───
 
 export async function getUserReports(userId: string): Promise<Report[]> {
-  const snapshot = await firestore()
-    .collection('reports')
-    .where('userId', '==', userId)
-    .orderBy('createdAt', 'desc')
-    .get();
+  const q = query(
+    collection(db, 'reports'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  const snapshot = await getDocs(q);
 
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate() || new Date(),
-  })) as Report[];
+  return snapshot.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      ...data,
+      createdAt: data.createdAt instanceof Timestamp
+        ? data.createdAt.toDate()
+        : new Date(),
+    };
+  }) as Report[];
 }
 
 export async function createReport(

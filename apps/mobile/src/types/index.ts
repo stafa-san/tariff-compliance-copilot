@@ -9,6 +9,7 @@ export type RootStackParamList = {
   ScenarioDetail: { scenario: ScenarioComparison };
   ShipmentDetail: { shipmentId: string };
   ShipmentCreate: undefined;
+  Audit: undefined;
   AuditResult: { findings: AuditFinding[]; riskScore: number };
   ReportDetail: { reportId: string };
   Form7501Detail: { sectionIndex: number };
