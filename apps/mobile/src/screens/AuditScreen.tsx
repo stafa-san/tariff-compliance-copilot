@@ -157,12 +157,12 @@ Instructions:
 5. Cross-check EVERY field between the two documents for discrepancies
 6. Report your findings grouped by category and calculate an overall risk score`;
 
-      // Send to audit API and stream results
+      // Send to mobile-specific audit API (non-streaming, returns JSON)
       setAnalysisStep('Running AI compliance analysis...');
       setActiveTools([]);
       setCompletedTools([]);
 
-      const response = await fetch(`${API_BASE}/api/audit`, {
+      const response = await fetch(`${API_BASE}/api/audit-mobile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -180,14 +180,44 @@ Instructions:
         throw new Error(errData.error || `API error: ${response.status}`);
       }
 
-      // Stream and parse results in real-time
-      const responseText = await response.text();
-      const parsedFindings = parseStreamResponse(responseText);
+      setAnalysisStep('Processing results...');
+      const data = await response.json();
 
-      setFindings(parsedFindings.findings);
-      setDutyResult(parsedFindings.dutyResult);
-      setRiskResult(parsedFindings.riskResult);
-      setAgentSummary(parsedFindings.summary);
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Map findings to our type
+      const auditFindings: AuditFinding[] = (data.findings || []).map((f: any) => ({
+        field: f.field || '',
+        severity: f.severity || 'info',
+        title: f.title || f.field || '',
+        description: f.description || '',
+        declaredValue: f.invoiceValue || f.declaredValue,
+        expectedValue: f.form7501Value || f.expectedValue,
+        recommendation: f.recommendation || '',
+      }));
+
+      setFindings(auditFindings);
+      setDutyResult(data.dutyResult || null);
+
+      // Build risk result
+      if (data.riskResult) {
+        setRiskResult(data.riskResult);
+      } else {
+        const errors = auditFindings.filter((f) => f.severity === 'error').length;
+        const warnings = auditFindings.filter((f) => f.severity === 'warning').length;
+        const score = Math.min(100, errors * 25 + warnings * 10);
+        setRiskResult({
+          score,
+          level: score >= 60 ? 'High' : score >= 30 ? 'Medium' : 'Low',
+          totalChecks: auditFindings.length,
+          errors,
+          warnings,
+        });
+      }
+
+      setAgentSummary(data.summary || '');
       setStep('results');
     } catch (err: any) {
       const msg = err?.message || String(err);
