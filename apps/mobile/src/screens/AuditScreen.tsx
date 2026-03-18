@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Card, Button, Badge } from '../components/ui';
 import { colors, spacing, typography, borderRadius, shadows } from '../theme';
 import { formatCurrency } from '../utils/format';
@@ -55,6 +55,8 @@ export function AuditScreen({ navigation }: RootStackScreenProps<'Audit'>) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState('');
   const [step, setStep] = useState<'upload' | 'analyzing' | 'results'>('upload');
+  const [activeTools, setActiveTools] = useState<string[]>([]);
+  const [completedTools, setCompletedTools] = useState<string[]>([]);
   const [findings, setFindings] = useState<AuditFinding[]>([]);
   const [dutyResult, setDutyResult] = useState<DutyResult | null>(null);
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
@@ -99,10 +101,14 @@ export function AuditScreen({ navigation }: RootStackScreenProps<'Audit'>) {
     });
 
     if (!response.ok) {
-      throw new Error(`PDF extraction failed: ${response.status}`);
+      const errBody = await response.text().catch(() => '');
+      throw new Error(`PDF extraction failed (${response.status}): ${errBody}`);
     }
 
     const data = await response.json();
+    if (!data.text) {
+      throw new Error('No text extracted from PDF');
+    }
     return data.text;
   };
 
@@ -151,8 +157,11 @@ Instructions:
 5. Cross-check EVERY field between the two documents for discrepancies
 6. Report your findings grouped by category and calculate an overall risk score`;
 
-      // Send to audit API
+      // Send to audit API and stream results
       setAnalysisStep('Running AI compliance analysis...');
+      setActiveTools([]);
+      setCompletedTools([]);
+
       const response = await fetch(`${API_BASE}/api/audit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -171,8 +180,7 @@ Instructions:
         throw new Error(errData.error || `API error: ${response.status}`);
       }
 
-      // Parse the streaming response
-      setAnalysisStep('Processing results...');
+      // Stream and parse results in real-time
       const responseText = await response.text();
       const parsedFindings = parseStreamResponse(responseText);
 
@@ -182,15 +190,16 @@ Instructions:
       setAgentSummary(parsedFindings.summary);
       setStep('results');
     } catch (err: any) {
-      console.error('Audit error:', err);
-      setError(err.message || 'Failed to run audit. Check your connection and try again.');
+      const msg = err?.message || String(err);
+      console.warn('Audit error:', msg);
+      setError(msg || 'Failed to run audit. Check your connection and try again.');
       setStep('upload');
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // Parse the Vercel AI SDK stream response
+  // Parse the Vercel AI SDK stream response (SSE data: format)
   const parseStreamResponse = (rawText: string) => {
     const findings: AuditFinding[] = [];
     let dutyResult: DutyResult | null = null;
@@ -198,70 +207,80 @@ Instructions:
     let summary = '';
 
     try {
-      // The stream format has lines like: 0:"text"\n or a]:{...}\n
       const lines = rawText.split('\n').filter(Boolean);
 
       for (const line of lines) {
-        // Tool call results contain our findings
-        if (line.includes('report_finding') || line.includes('"field"')) {
-          try {
-            // Extract JSON from the line
-            const jsonMatch = line.match(/\{[^{}]*"field"[^{}]*\}/g);
-            if (jsonMatch) {
-              for (const match of jsonMatch) {
-                const parsed = JSON.parse(match);
-                if (parsed.field && parsed.severity) {
-                  findings.push({
-                    field: parsed.field,
-                    severity: parsed.severity,
-                    title: parsed.title || parsed.field,
-                    description: parsed.description || '',
-                    declaredValue: parsed.invoiceValue || parsed.declaredValue,
-                    expectedValue: parsed.form7501Value || parsed.expectedValue,
-                    recommendation: parsed.recommendation || '',
-                  });
-                }
-              }
-            }
-          } catch { /* skip unparseable lines */ }
-        }
+        // SSE format: "data: {...json...}"
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.substring(6);
 
-        // Extract duty calculation
-        if (line.includes('calculate_expected_duties') || line.includes('"totalDuties"')) {
-          try {
-            const jsonMatch = line.match(/\{[^{}]*"totalDuties"[^{}]*\}/);
-            if (jsonMatch) {
-              dutyResult = JSON.parse(jsonMatch[0]);
-            }
-          } catch { /* skip */ }
-        }
+        try {
+          const event = JSON.parse(jsonStr);
 
-        // Extract risk score
-        if (line.includes('calculate_risk_score') || line.includes('"score"')) {
-          try {
-            const jsonMatch = line.match(/\{[^{}]*"score"[^{}]*"level"[^{}]*\}/);
-            if (jsonMatch) {
-              riskResult = JSON.parse(jsonMatch[0]);
-            }
-          } catch { /* skip */ }
-        }
+          // Tool input available — contains the tool args (findings, duties, risk)
+          if (event.type === 'tool-input-available') {
+            const input = event.input;
+            const toolName = event.toolName;
 
-        // Extract text content for summary
-        if (line.startsWith('0:"')) {
-          try {
-            const text = JSON.parse(line.substring(2));
-            if (typeof text === 'string') {
-              summary += text;
+            if (toolName === 'report_finding' && input?.field && input?.severity) {
+              findings.push({
+                field: input.field,
+                severity: input.severity,
+                title: input.title || input.field,
+                description: input.description || '',
+                declaredValue: input.invoiceValue || input.declaredValue,
+                expectedValue: input.form7501Value || input.expectedValue,
+                recommendation: input.recommendation || '',
+              });
             }
-          } catch { /* skip */ }
-        }
+
+            if (toolName === 'calculate_expected_duties' && input?.enteredValue) {
+              // Store input for later — actual result comes in tool-output-available
+            }
+
+            if (toolName === 'calculate_risk_score' && input?.errorCount !== undefined) {
+              // Store for fallback
+            }
+          }
+
+          // Tool output available — contains actual computed results
+          if (event.type === 'tool-output-available') {
+            const output = event.output;
+
+            if (output?.totalDuties !== undefined) {
+              dutyResult = output;
+            }
+
+            if (output?.score !== undefined && output?.level !== undefined) {
+              riskResult = output;
+            }
+
+            // report_finding output echoes the input
+            if (output?.field && output?.severity && !findings.find((f) => f.field === output.field && f.title === output.title)) {
+              findings.push({
+                field: output.field,
+                severity: output.severity,
+                title: output.title || output.field,
+                description: output.description || '',
+                declaredValue: output.invoiceValue || output.declaredValue,
+                expectedValue: output.form7501Value || output.expectedValue,
+                recommendation: output.recommendation || '',
+              });
+            }
+          }
+
+          // Text delta — agent summary
+          if (event.type === 'text-delta' && event.textDelta) {
+            summary += event.textDelta;
+          }
+        } catch { /* skip unparseable line */ }
       }
     } catch (e) {
-      console.error('Stream parse error:', e);
+      console.warn('Stream parse error:', e);
     }
 
-    // Compute risk if not found
-    if (!riskResult && findings.length > 0) {
+    // Compute risk if not extracted from stream
+    if (!riskResult) {
       const errors = findings.filter((f) => f.severity === 'error').length;
       const warnings = findings.filter((f) => f.severity === 'warning').length;
       const score = Math.min(100, errors * 25 + warnings * 10);
@@ -315,6 +334,8 @@ Instructions:
     setRiskResult(null);
     setAgentSummary('');
     setError('');
+    setActiveTools([]);
+    setCompletedTools([]);
   };
 
   const getSeverityConfig = (severity: string) => {
@@ -438,11 +459,46 @@ Instructions:
             <Text style={styles.analyzingText}>{analysisStep}</Text>
 
             <View style={styles.stepsList}>
-              <AnalysisStep icon="document-outline" label="Extract document data" active={analysisStep.includes('Extract')} />
-              <AnalysisStep icon="code-outline" label="Validate HTS codes" active={analysisStep.includes('AI')} />
-              <AnalysisStep icon="shield-checkmark-outline" label="Check trade remedies" active={analysisStep.includes('AI')} />
-              <AnalysisStep icon="calculator-outline" label="Calculate expected duties" active={analysisStep.includes('Process')} />
-              <AnalysisStep icon="document-text-outline" label="Generate findings report" active={analysisStep.includes('Process')} />
+              <AnalysisStep
+                icon="document-outline"
+                label="Extract document data"
+                status={analysisStep.includes('AI') || analysisStep.includes('Process') ? 'done' : analysisStep.includes('Extract') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="search-outline"
+                label="Validate HTS codes (USITC)"
+                status={analysisStep.includes('AI') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="flag-outline"
+                label="Check Section 122 (Universal 10%)"
+                status={analysisStep.includes('AI') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="alert-circle-outline"
+                label="Check Section 301 (China 25%)"
+                status={analysisStep.includes('AI') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="shield-outline"
+                label="Check Section 232 (Steel/Aluminum)"
+                status={analysisStep.includes('AI') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="calculator-outline"
+                label="Calculate duties (MPF/HMF)"
+                status={analysisStep.includes('Process') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="checkmark-done-outline"
+                label="Cross-reference documents"
+                status={analysisStep.includes('Process') ? 'active' : 'pending'}
+              />
+              <AnalysisStep
+                icon="document-text-outline"
+                label="Generate findings & risk score"
+                status={analysisStep.includes('Process') ? 'active' : 'pending'}
+              />
             </View>
           </Animated.View>
         )}
@@ -574,16 +630,22 @@ Instructions:
   );
 }
 
-function AnalysisStep({ icon, label, active }: { icon: keyof typeof Ionicons.glyphMap; label: string; active: boolean }) {
+function AnalysisStep({ icon, label, status }: { icon: keyof typeof Ionicons.glyphMap; label: string; status: 'pending' | 'active' | 'done' }) {
   return (
-    <View style={analysisStyles.step}>
-      {active ? (
+    <Animated.View entering={status !== 'pending' ? FadeInDown.duration(300) : undefined} style={analysisStyles.step}>
+      {status === 'done' ? (
+        <Ionicons name="checkmark-circle" size={20} color={colors.success[600]} />
+      ) : status === 'active' ? (
         <ActivityIndicator size="small" color={colors.primary[600]} />
       ) : (
         <Ionicons name={icon} size={20} color={colors.neutral[300]} />
       )}
-      <Text style={[analysisStyles.label, active && analysisStyles.labelActive]}>{label}</Text>
-    </View>
+      <Text style={[
+        analysisStyles.label,
+        status === 'active' && analysisStyles.labelActive,
+        status === 'done' && analysisStyles.labelDone,
+      ]}>{label}</Text>
+    </Animated.View>
   );
 }
 
@@ -597,9 +659,10 @@ function DutyRow({ label, value }: { label: string; value: number }) {
 }
 
 const analysisStyles = StyleSheet.create({
-  step: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  step: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xs },
   label: { ...typography.body, color: colors.neutral[400] },
-  labelActive: { color: colors.primary[600] },
+  labelActive: { color: colors.primary[600], fontWeight: '500' },
+  labelDone: { color: colors.success[600] },
 });
 
 const styles = StyleSheet.create({
