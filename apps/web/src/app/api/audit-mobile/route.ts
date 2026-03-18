@@ -29,99 +29,48 @@ export async function POST(req: Request) {
       maxSteps: 12,
     });
 
-    // Extract findings, duties, and risk from all steps
+    // Extract from all steps
     const findings: unknown[] = [];
     let dutyResult = null;
     let riskResult = null;
 
-    // Try steps API first (AI SDK v4+)
-    if (result.steps && Array.isArray(result.steps)) {
-      for (const step of result.steps) {
-        if (step.toolCalls) {
-          for (const tc of step.toolCalls) {
-            if (tc.toolName === "report_finding") {
-              findings.push(tc.args);
-            }
-          }
-        }
-        if (step.toolResults) {
-          for (const tr of step.toolResults) {
-            const res = tr.result as Record<string, unknown>;
-            if (res?.totalDuties !== undefined) {
-              dutyResult = res;
-            }
-            if (res?.score !== undefined && res?.level !== undefined) {
-              riskResult = res;
-            }
-            // report_finding tool echoes the args as result
-            if (
-              res?.field &&
-              res?.severity &&
-              !findings.some(
-                (f: any) =>
-                  f.field === res.field && f.title === res.title,
-              )
-            ) {
-              findings.push(res);
-            }
-          }
-        }
-      }
-    }
-
-    // Fallback: check toolCalls and toolResults at top level
-    if (findings.length === 0) {
-      const tc = (result as any).toolCalls;
-      const tr = (result as any).toolResults;
-      if (Array.isArray(tc)) {
-        for (const call of tc) {
-          if (call.toolName === "report_finding") {
-            findings.push(call.args);
-          }
-        }
-      }
-      if (Array.isArray(tr)) {
-        for (const res of tr) {
-          const r = res.result as Record<string, unknown>;
-          if (r?.totalDuties !== undefined) dutyResult = r;
-          if (r?.score !== undefined && r?.level !== undefined) riskResult = r;
-          if (r?.field && r?.severity) findings.push(r);
-        }
-      }
-    }
-
-    // Debug: log the actual structure
-    const debugInfo: Record<string, unknown> = {
-      stepCount: result.steps?.length ?? 0,
-      textLength: result.text?.length ?? 0,
-    };
-
-    if (result.steps?.length) {
-      const step0 = result.steps[0];
-      debugInfo.step0Keys = Object.keys(step0);
-      debugInfo.step0ToolCallCount = step0.toolCalls?.length ?? 0;
-      debugInfo.step0ToolResultCount = step0.toolResults?.length ?? 0;
-      if (step0.toolCalls?.length) {
-        debugInfo.step0ToolNames = step0.toolCalls.map((tc: any) => tc.toolName);
-      }
-      if (step0.toolResults?.length) {
-        debugInfo.step0ResultSample = JSON.stringify(step0.toolResults[0]).slice(0, 200);
-      }
-    }
-
-    // Also try extracting from all steps more aggressively
     for (const step of result.steps || []) {
-      const trs = step.toolResults || [];
-      for (const tr of trs) {
-        const toolName = (tr as any).toolName;
-        const res = tr.result as Record<string, unknown>;
-        if (toolName === "report_finding" || (res?.field && res?.severity)) {
-          findings.push(res);
+      // Check toolCalls for report_finding args
+      for (const tc of step.toolCalls || []) {
+        if (tc.toolName === "report_finding") {
+          findings.push(tc.args);
         }
-        if (toolName === "calculate_expected_duties" || res?.totalDuties !== undefined) {
+      }
+
+      // Check toolResults for calculated values
+      // toolResults can have .result or .output depending on SDK version
+      for (const tr of step.toolResults || []) {
+        const res =
+          (tr as any).result ?? (tr as any).output ?? {};
+        const toolName = (tr as any).toolName ?? "";
+
+        if (toolName === "report_finding" || (res?.field && res?.severity)) {
+          // Avoid duplicates (already added from toolCalls)
+          if (
+            !findings.some(
+              (f: any) => f.field === res.field && f.title === res.title,
+            )
+          ) {
+            findings.push(res);
+          }
+        }
+
+        if (
+          toolName === "calculate_expected_duties" ||
+          res?.totalDuties !== undefined
+        ) {
           dutyResult = res;
         }
-        if (toolName === "calculate_risk_score" || (res?.score !== undefined && res?.level !== undefined)) {
+
+        if (
+          toolName === "calculate_risk_score" ||
+          (res?.score !== undefined && res?.level !== undefined)
+        ) {
           riskResult = res;
         }
       }
@@ -132,11 +81,10 @@ export async function POST(req: Request) {
       dutyResult,
       riskResult,
       summary: result.text || "",
-      debug: debugInfo,
+      stepCount: result.steps?.length ?? 0,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    const stack = err instanceof Error ? err.stack?.slice(0, 500) : "";
     const isCredit =
       message.includes("credit") ||
       message.includes("billing") ||
@@ -147,7 +95,6 @@ export async function POST(req: Request) {
         error: isCredit
           ? "API credit limit reached. Please check your API billing."
           : `Audit failed: ${message}`,
-        debug: { stack },
       },
       { status: isCredit ? 402 : 500 },
     );
