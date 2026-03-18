@@ -11,10 +11,22 @@ export async function POST(req: Request) {
   try {
     const { messages: uiMessages } = await req.json();
 
+    // Support both UI message format (from useChat) and simple {role, content} format (from mobile)
+    let modelMessages;
+    try {
+      modelMessages = await convertToModelMessages(uiMessages);
+    } catch {
+      // Fallback: simple messages format from mobile app
+      modelMessages = uiMessages.map((m: { role: string; content: string }) => ({
+        role: m.role as "user" | "assistant" | "system",
+        content: m.content,
+      }));
+    }
+
     const result = streamText({
       model: openai("gpt-4o"),
       system: AUDIT_SYSTEM_PROMPT,
-      messages: await convertToModelMessages(uiMessages),
+      messages: modelMessages,
       tools: auditTools,
       temperature: 0,
       stopWhen: stepCountIs(12),
